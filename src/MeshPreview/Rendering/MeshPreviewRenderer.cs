@@ -135,6 +135,7 @@ internal sealed class MeshPreviewRenderer : IDisposable
         _meshShader.SetInt("uShowSections", scene.ShowSections ? 1 : 0);
         _meshShader.SetInt("uSelectedBone", ResolveBoneIndex(mesh, scene.SelectedBoneName));
         _meshShader.SetVector3("uBaseColor", baseColor);
+        _meshShader.SetInt("uEnableSkinning", 0); // Disabled by default for UE3 meshes
 
         GL.BindVertexArray(mesh.VertexArrayObject);
         foreach (MeshPreviewSection section in mesh.Sections)
@@ -677,6 +678,9 @@ internal sealed class MeshPreviewRenderer : IDisposable
         uniform mat4 uProjection;
         uniform mat4 uView;
         uniform mat4 uModel;
+        uniform mat4 uBoneMatrices[128];
+        uniform int uBoneCount;
+        uniform int uEnableSkinning;
 
         out vec3 vWorldPosition;
         out vec3 vNormal;
@@ -689,11 +693,46 @@ internal sealed class MeshPreviewRenderer : IDisposable
 
         void main()
         {
-            vec4 worldPosition = uModel * vec4(aPosition, 1.0);
+            vec4 skinnedPosition;
+            vec3 skinnedNormal;
+            vec3 skinnedTangent;
+            vec3 skinnedBitangent;
+
+            if (uEnableSkinning > 0 && uBoneCount > 0 && (aBoneWeights.x + aBoneWeights.y + aBoneWeights.z + aBoneWeights.w) > 0.0)
+            {
+                skinnedPosition = vec4(0.0);
+                skinnedNormal = vec3(0.0);
+                skinnedTangent = vec3(0.0);
+                skinnedBitangent = vec3(0.0);
+
+                for (int i = 0; i < 4; i++)
+                {
+                    int boneIndex = aBoneIndices[i];
+                    float weight = aBoneWeights[i];
+
+                    if (weight > 0.0 && boneIndex >= 0 && boneIndex < uBoneCount)
+                    {
+                        mat4 boneMatrix = uBoneMatrices[boneIndex];
+                        skinnedPosition += boneMatrix * vec4(aPosition, 1.0) * weight;
+                        skinnedNormal += mat3(boneMatrix) * aNormal * weight;
+                        skinnedTangent += mat3(boneMatrix) * aTangent * weight;
+                        skinnedBitangent += mat3(boneMatrix) * aBitangent * weight;
+                    }
+                }
+            }
+            else
+            {
+                skinnedPosition = vec4(aPosition, 1.0);
+                skinnedNormal = aNormal;
+                skinnedTangent = aTangent;
+                skinnedBitangent = aBitangent;
+            }
+
+            vec4 worldPosition = uModel * skinnedPosition;
             vWorldPosition = worldPosition.xyz;
-            vNormal = mat3(uModel) * aNormal;
-            vTangent = mat3(uModel) * aTangent;
-            vBitangent = mat3(uModel) * aBitangent;
+            vNormal = mat3(uModel) * skinnedNormal;
+            vTangent = mat3(uModel) * skinnedTangent;
+            vBitangent = mat3(uModel) * skinnedBitangent;
             vUv = aUv;
             vBoneIndices = aBoneIndices;
             vBoneWeights = aBoneWeights;

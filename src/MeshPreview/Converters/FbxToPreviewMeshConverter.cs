@@ -85,8 +85,8 @@ internal sealed class FbxToPreviewMeshConverter
                         continue;
 
                     previewMesh.Indices.Add((uint)(vertexBase + face.Indices[0]));
-                    previewMesh.Indices.Add((uint)(vertexBase + face.Indices[1]));
                     previewMesh.Indices.Add((uint)(vertexBase + face.Indices[2]));
+                    previewMesh.Indices.Add((uint)(vertexBase + face.Indices[1]));
                 }
 
                 previewMesh.Sections.Add(new MeshPreviewSection
@@ -117,8 +117,14 @@ internal sealed class FbxToPreviewMeshConverter
         NumericsMatrix4x4 parentTransform,
         IReadOnlySet<string> skinnedBoneNames)
     {
-        NumericsMatrix4x4 local = ToNumerics(node.Transform);
-        NumericsMatrix4x4 global = parentTransform * local;
+        // Convert the local transform from FBX space to our coordinate system first
+        NumericsMatrix4x4 localFbx = ToNumerics(node.Transform);
+        NumericsMatrix4x4 local = ConvertTransform(localFbx);
+
+        // Build global transform: for row-major matrices, multiply local * parent
+        // This way, when a vector is multiplied: vector * local * parent applies local first
+        NumericsMatrix4x4 global = local * parentTransform;
+
         string nodeName = node.Name ?? string.Empty;
         int currentIndex = parentIndex;
 
@@ -129,12 +135,14 @@ internal sealed class FbxToPreviewMeshConverter
             {
                 Name = nodeName,
                 ParentIndex = parentIndex,
-                LocalTransform = ConvertTransform(local),
-                GlobalTransform = ConvertTransform(global)
+                LocalTransform = local,
+                GlobalTransform = global,
+                OffsetMatrix = NumericsMatrix4x4.Identity
             });
             boneIndexByName[nodeName] = currentIndex;
         }
 
+        // Pass along the converted global transform to children
         foreach (Node child in node.Children)
             BuildBoneHierarchy(child, currentIndex, bones, boneIndexByName, global, skinnedBoneNames);
     }

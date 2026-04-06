@@ -8,4 +8,5 @@ internal sealed class MeshPreviewBone
     public int ParentIndex { get; init; } = -1;
     public Matrix4x4 LocalTransform { get; init; } = Matrix4x4.Identity;
     public Matrix4x4 GlobalTransform { get; set; } = Matrix4x4.Identity;
+    public Matrix4x4 OffsetMatrix { get; init; } = Matrix4x4.Identity;
 }

@@ -170,6 +170,12 @@ internal sealed class MeshImporterPanel : UserControl
 
     public void SetBusy(bool isBusy)
     {
+        if (InvokeRequired)
+        {
+            Invoke(() => SetBusy(isBusy));
+            return;
+        }
+
         _browseUpkButton.Enabled = !isBusy;
         _browseFbxButton.Enabled = !isBusy;
         _refreshMeshesButton.Enabled = !isBusy;
@@ -181,6 +187,12 @@ internal sealed class MeshImporterPanel : UserControl
 
     public void ReportProgress(int value, int maximum, string message)
     {
+        if (InvokeRequired)
+        {
+            Invoke(() => ReportProgress(value, maximum, message));
+            return;
+        }
+
         _progressBar.Maximum = Math.Max(1, maximum);
         _progressBar.Value = Math.Clamp(value, 0, _progressBar.Maximum);
         _progressPercentLabel.Text = $"{(int)Math.Round((_progressBar.Value / (double)_progressBar.Maximum) * 100)}%";
@@ -189,6 +201,12 @@ internal sealed class MeshImporterPanel : UserControl
 
     public void AppendLog(string message)
     {
+        if (InvokeRequired)
+        {
+            Invoke(() => AppendLog(message));
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(message))
             return;
 
