@@ -14,21 +14,61 @@ internal sealed class FbxMeshImporter
         if (!File.Exists(fbxPath))
             throw new FileNotFoundException("FBX file was not found.", fbxPath);
 
-        using AssimpContext context = new();
-        Scene scene = context.ImportFile(
-            fbxPath,
-            PostProcessSteps.Triangulate |
-            PostProcessSteps.GenerateSmoothNormals |
-            PostProcessSteps.CalculateTangentSpace |
-            PostProcessSteps.ValidateDataStructure |
-            PostProcessSteps.ImproveCacheLocality);
+        string importPath = CreateAsciiSafeImportPath(fbxPath, out string temporaryImportPath);
+        try
+        {
+            using AssimpContext context = new();
+            Scene scene = context.ImportFile(
+                importPath,
+                PostProcessSteps.Triangulate |
+                PostProcessSteps.GenerateSmoothNormals |
+                PostProcessSteps.CalculateTangentSpace |
+                PostProcessSteps.ValidateDataStructure |
+                PostProcessSteps.ImproveCacheLocality);
 
-        if (scene == null || scene.MeshCount == 0)
-            throw new InvalidOperationException("The FBX did not contain any meshes.");
+            if (scene == null || scene.MeshCount == 0)
+                throw new InvalidOperationException("The FBX did not contain any meshes.");
 
-        NeutralMesh neutralMesh = new();
-        ReadNode(scene, scene.RootNode, NumericsMatrix4x4.Identity, neutralMesh);
-        return neutralMesh;
+            NeutralMesh neutralMesh = new();
+            ReadNode(scene, scene.RootNode, NumericsMatrix4x4.Identity, neutralMesh);
+            return neutralMesh;
+        }
+        catch (AssimpException ex)
+        {
+            throw new InvalidOperationException(
+                $"Assimp failed to import the FBX. Original path: '{fbxPath}'. Import path: '{importPath}'. {ex.Message}",
+                ex);
+        }
+        finally
+        {
+            if (temporaryImportPath != null && File.Exists(temporaryImportPath))
+                File.Delete(temporaryImportPath);
+        }
+    }
+
+    private static string CreateAsciiSafeImportPath(string fbxPath, out string temporaryImportPath)
+    {
+        temporaryImportPath = null;
+        if (IsAscii(fbxPath))
+            return fbxPath;
+
+        string extension = Path.GetExtension(fbxPath);
+        string tempDirectory = Path.Combine(Path.GetTempPath(), "MHUpkManager", "AsciiSafeImport");
+        Directory.CreateDirectory(tempDirectory);
+        temporaryImportPath = Path.Combine(tempDirectory, $"{Guid.NewGuid():N}{extension}");
+        File.Copy(fbxPath, temporaryImportPath, true);
+        return temporaryImportPath;
+    }
+
+    private static bool IsAscii(string value)
+    {
+        foreach (char c in value)
+        {
+            if (c > 127)
+                return false;
+        }
+
+        return true;
     }
 
     private static void ReadNode(Scene scene, Node node, NumericsMatrix4x4 parentTransform, NeutralMesh neutralMesh)
