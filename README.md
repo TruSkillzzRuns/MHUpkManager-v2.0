@@ -1,6 +1,3 @@
 # MHUpkManager
-
-See [PROJECT_STATUS.md](C:/Users/TruSkillzzRuns/mhupkmanager-link/PROJECT_STATUS.md) for the short current project status.
-See [PROJECT_REFERENCE.md](C:/Users/TruSkillzzRuns/mhupkmanager-link/PROJECT_REFERENCE.md) for the more detailed technical reference.
-
+Thanks to AlexBond for the orignal manager and work.
 Upk Manager for Marvel Heroes
