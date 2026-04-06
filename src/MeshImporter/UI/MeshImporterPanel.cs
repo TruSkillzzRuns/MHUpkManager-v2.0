@@ -135,37 +135,43 @@ internal sealed class MeshImporterPanel : UserControl
 
     public string UpkPath
     {
-        get => _upkPathTextBox.Text;
-        set => _upkPathTextBox.Text = value;
+        get => InvokeIfRequired(() => _upkPathTextBox.Text);
+        set => InvokeIfRequired(() => _upkPathTextBox.Text = value);
     }
 
     public string FbxPath
     {
-        get => _fbxPathTextBox.Text;
-        set => _fbxPathTextBox.Text = value;
+        get => InvokeIfRequired(() => _fbxPathTextBox.Text);
+        set => InvokeIfRequired(() => _fbxPathTextBox.Text = value);
     }
 
-    public string SelectedMeshName => _skeletalMeshComboBox.SelectedItem as string;
-    public int SelectedLodIndex => _lodComboBox.SelectedIndex < 0 ? 0 : _lodComboBox.SelectedIndex;
-    public bool ReplaceAllLods => _replaceAllLodsCheckBox.Checked;
+    public string SelectedMeshName => InvokeIfRequired(() => _skeletalMeshComboBox.SelectedItem as string);
+    public int SelectedLodIndex => InvokeIfRequired(() => _lodComboBox.SelectedIndex < 0 ? 0 : _lodComboBox.SelectedIndex);
+    public bool ReplaceAllLods => InvokeIfRequired(() => _replaceAllLodsCheckBox.Checked);
 
     public void SetMeshOptions(IEnumerable<string> meshNames)
     {
-        _skeletalMeshComboBox.Items.Clear();
-        foreach (string meshName in meshNames.OrderBy(static name => name))
-            _skeletalMeshComboBox.Items.Add(meshName);
+        InvokeIfRequired(() =>
+        {
+            _skeletalMeshComboBox.Items.Clear();
+            foreach (string meshName in meshNames.OrderBy(static name => name))
+                _skeletalMeshComboBox.Items.Add(meshName);
 
-        if (_skeletalMeshComboBox.Items.Count > 0)
-            _skeletalMeshComboBox.SelectedIndex = 0;
+            if (_skeletalMeshComboBox.Items.Count > 0)
+                _skeletalMeshComboBox.SelectedIndex = 0;
+        });
     }
 
     public void SetLodOptions(int lodCount)
     {
-        _lodComboBox.Items.Clear();
-        for (int i = 0; i < Math.Max(1, lodCount); i++)
-            _lodComboBox.Items.Add($"LOD {i}");
+        InvokeIfRequired(() =>
+        {
+            _lodComboBox.Items.Clear();
+            for (int i = 0; i < Math.Max(1, lodCount); i++)
+                _lodComboBox.Items.Add($"LOD {i}");
 
-        _lodComboBox.SelectedIndex = 0;
+            _lodComboBox.SelectedIndex = 0;
+        });
     }
 
     public void SetBusy(bool isBusy)
@@ -218,7 +224,7 @@ internal sealed class MeshImporterPanel : UserControl
 
     public void ClearLog()
     {
-        _logTextBox.Clear();
+        InvokeIfRequired(() => _logTextBox.Clear());
     }
 
     protected override void OnLayout(LayoutEventArgs levent)
@@ -327,5 +333,24 @@ internal sealed class MeshImporterPanel : UserControl
             "4. Run Import Mesh and review the log for dropped influences, section rebuilds, topology warnings, and replacement status.",
             "5. Use this when the replacement FBX is already ready and you want to write it back into the UPK."
         ]);
+    }
+
+    private void InvokeIfRequired(Action action)
+    {
+        if (InvokeRequired)
+        {
+            Invoke(action);
+            return;
+        }
+
+        action();
+    }
+
+    private T InvokeIfRequired<T>(Func<T> func)
+    {
+        if (InvokeRequired)
+            return (T)Invoke(func);
+
+        return func();
     }
 }
