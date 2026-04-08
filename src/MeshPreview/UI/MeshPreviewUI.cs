@@ -24,6 +24,7 @@ internal sealed class MeshPreviewUI : UserControl
     private readonly RichTextBox _detailsTextBox;
     private readonly Button _loadFbxButton;
     private readonly Button _loadUe3Button;
+    private readonly Button _useCurrentUpkButton;
     private readonly ComboBox _rendererComboBox;
     private readonly CheckBox _showFbxCheckBox;
     private readonly CheckBox _showUe3CheckBox;
@@ -75,6 +76,7 @@ internal sealed class MeshPreviewUI : UserControl
 
         _loadFbxButton = CreateButton("Load FBX Mesh");
         _loadUe3Button = CreateButton("Load UE3 Mesh From UPK");
+        _useCurrentUpkButton = CreateButton("Use Current UPK");
         _rendererLabel = CreateLabel("Renderer:");
         _rendererComboBox = CreateComboBox();
         _rendererComboBox.Items.AddRange(Enum.GetNames(typeof(MeshPreviewBackend)));
@@ -182,6 +184,7 @@ internal sealed class MeshPreviewUI : UserControl
         AddRow(WorkspaceUiStyle.CreateWorkflowSectionHeader(1, "Source"));
         AddRow(_loadFbxButton);
         AddRow(_loadUe3Button);
+        AddRow(_useCurrentUpkButton);
         AddRow(WorkspaceUiStyle.CreateWorkflowSectionHeader(2, "Display"));
         AddRow(_rendererLabel);
         AddRow(_rendererComboBox);
@@ -344,6 +347,8 @@ internal sealed class MeshPreviewUI : UserControl
         _logger.Log(message);
     }
 
+    public event EventHandler UseCurrentUpkRequested;
+
     public MeshPreviewBackend CurrentBackend => _previewControl.Backend;
 
     public void SetPreviewMaterialTexture(TexturePreviewMaterialSlot slot, TexturePreviewTexture texture)
@@ -414,6 +419,7 @@ internal sealed class MeshPreviewUI : UserControl
     {
         _loadFbxButton.Click += (_, _) => LoadFbxViaDialog();
         _loadUe3Button.Click += async (_, _) => await LoadUe3ViaDialogAsync().ConfigureAwait(true);
+        _useCurrentUpkButton.Click += (_, _) => UseCurrentUpkRequested?.Invoke(this, EventArgs.Empty);
         _resetPreviewButton.Click += (_, _) => ResetPreviewState();
         _resetCameraButton.Click += (_, _) => _previewControl.ResetCamera();
         _rendererComboBox.SelectedIndexChanged += (_, _) => ApplyRendererSelection();
@@ -664,7 +670,7 @@ internal sealed class MeshPreviewUI : UserControl
         }
     }
 
-    private async Task<string> PromptForSkeletalMeshExportAsync(string upkPath)
+    public async Task<string> PromptForSkeletalMeshExportAsync(string upkPath)
     {
         // TODO: Replace this picker with your existing object/export-selection UI if you want the preview tab
         // to bind directly to the app's current package browser rather than prompting for an export list.

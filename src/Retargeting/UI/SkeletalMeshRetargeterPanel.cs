@@ -16,6 +16,7 @@ internal sealed class SkeletalMeshRetargeterPanel : UserControl
     private readonly Panel _logPanel;
     private readonly TextBox _upkPathTextBox;
     private readonly Button _browseUpkButton;
+    private readonly Button _useCurrentUpkButton;
     private readonly ComboBox _skeletalMeshComboBox;
     private readonly ComboBox _lodComboBox;
     private readonly Button _importMeshButton;
@@ -66,6 +67,8 @@ internal sealed class SkeletalMeshRetargeterPanel : UserControl
         _upkPathTextBox = CreateTextBox();
         _browseUpkButton = CreateButton("Browse UPK");
         _browseUpkButton.Click += (_, _) => BrowseUpkRequested?.Invoke(this, EventArgs.Empty);
+        _useCurrentUpkButton = CreateButton("Use Current UPK");
+        _useCurrentUpkButton.Click += (_, _) => UseCurrentUpkRequested?.Invoke(this, EventArgs.Empty);
 
         _skeletalMeshComboBox = CreateComboBox();
         _skeletalMeshComboBox.SelectedIndexChanged += (_, _) => SkeletalMeshChanged?.Invoke(this, EventArgs.Empty);
@@ -259,6 +262,7 @@ internal sealed class SkeletalMeshRetargeterPanel : UserControl
         AddLeftRow(CreateLabel("UPK File:"));
         AddLeftRow(_upkPathTextBox);
         AddLeftRow(_browseUpkButton);
+        AddLeftRow(_useCurrentUpkButton);
         AddLeftRow(CreateLabel("SkeletalMesh Export:"));
         AddLeftRow(_skeletalMeshComboBox);
         AddLeftRow(CreateLabel("LOD Selection:"));
@@ -377,6 +381,7 @@ internal sealed class SkeletalMeshRetargeterPanel : UserControl
     }
 
     public event EventHandler BrowseUpkRequested;
+    public event EventHandler UseCurrentUpkRequested;
     public event EventHandler SkeletalMeshChanged;
     public event EventHandler ImportMeshRequested;
     public event EventHandler ImportAnimSetRequested;
@@ -460,6 +465,7 @@ internal sealed class SkeletalMeshRetargeterPanel : UserControl
         foreach (Control control in new Control[]
         {
             _browseUpkButton,
+            _useCurrentUpkButton,
             _skeletalMeshComboBox,
             _lodComboBox,
             _importMeshButton,

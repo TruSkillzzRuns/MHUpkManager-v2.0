@@ -36,6 +36,9 @@ namespace MHUpkManager
             menuStrip1 = new MenuStrip();
             fileToolStripMenuItem = new ToolStripMenuItem();
             openFileMenuItem = new ToolStripMenuItem();
+            setUpkBrowseFolderMenuItem = new ToolStripMenuItem();
+            recentUpksMenuItem = new ToolStripMenuItem();
+            clearRecentUpksMenuItem = new ToolStripMenuItem();
             loadManifestMenuItem = new ToolStripMenuItem();
             darkModeMenuItem = new ToolStripMenuItem();
             toolStripMenuItem3 = new ToolStripSeparator();
@@ -133,7 +136,7 @@ namespace MHUpkManager
             // 
             // fileToolStripMenuItem
             // 
-            fileToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { openFileMenuItem, loadManifestMenuItem, darkModeMenuItem, toolStripMenuItem3, saveMenuItem });
+            fileToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { openFileMenuItem, setUpkBrowseFolderMenuItem, recentUpksMenuItem, loadManifestMenuItem, darkModeMenuItem, toolStripMenuItem3, saveMenuItem });
             fileToolStripMenuItem.Name = "fileToolStripMenuItem";
             fileToolStripMenuItem.Size = new Size(37, 20);
             fileToolStripMenuItem.Text = "File";
@@ -145,10 +148,31 @@ namespace MHUpkManager
             openFileMenuItem.Text = "Open Upk...";
             openFileMenuItem.Click += openMenuItem_Click;
             // 
+            // setUpkBrowseFolderMenuItem
+            // 
+            setUpkBrowseFolderMenuItem.Name = "setUpkBrowseFolderMenuItem";
+            setUpkBrowseFolderMenuItem.Size = new Size(202, 22);
+            setUpkBrowseFolderMenuItem.Text = "Set UPK Browse Folder...";
+            setUpkBrowseFolderMenuItem.Click += setUpkBrowseFolderMenuItem_Click;
+            // 
+            // recentUpksMenuItem
+            // 
+            recentUpksMenuItem.DropDownItems.AddRange(new ToolStripItem[] { clearRecentUpksMenuItem });
+            recentUpksMenuItem.Name = "recentUpksMenuItem";
+            recentUpksMenuItem.Size = new Size(202, 22);
+            recentUpksMenuItem.Text = "Recent UPKs";
+            // 
+            // clearRecentUpksMenuItem
+            // 
+            clearRecentUpksMenuItem.Name = "clearRecentUpksMenuItem";
+            clearRecentUpksMenuItem.Size = new Size(169, 22);
+            clearRecentUpksMenuItem.Text = "Clear Recent UPKs";
+            clearRecentUpksMenuItem.Click += clearRecentUpksMenuItem_Click;
+            // 
             // loadManifestMenuItem
             // 
             loadManifestMenuItem.Name = "loadManifestMenuItem";
-            loadManifestMenuItem.Size = new Size(158, 22);
+            loadManifestMenuItem.Size = new Size(202, 22);
             loadManifestMenuItem.Text = "Load Manifest...";
             loadManifestMenuItem.Click += loadManifestMenuItem_Click;
             // 
@@ -156,19 +180,19 @@ namespace MHUpkManager
             // 
             darkModeMenuItem.CheckOnClick = true;
             darkModeMenuItem.Name = "darkModeMenuItem";
-            darkModeMenuItem.Size = new Size(158, 22);
+            darkModeMenuItem.Size = new Size(202, 22);
             darkModeMenuItem.Text = "Dark Mode";
             darkModeMenuItem.Click += darkModeMenuItem_Click;
             // 
             // toolStripMenuItem3
             // 
             toolStripMenuItem3.Name = "toolStripMenuItem3";
-            toolStripMenuItem3.Size = new Size(155, 6);
+            toolStripMenuItem3.Size = new Size(199, 6);
             // 
             // saveMenuItem
             // 
             saveMenuItem.Name = "saveMenuItem";
-            saveMenuItem.Size = new Size(158, 22);
+            saveMenuItem.Size = new Size(202, 22);
             saveMenuItem.Text = "Save Upk...";
             saveMenuItem.Click += saveMenuItem_Click;
             // 
@@ -823,6 +847,9 @@ namespace MHUpkManager
         private DataGridView importGridView;
         private DataGridView exportGridView;
         private ToolStripMenuItem openFileMenuItem;
+        private ToolStripMenuItem setUpkBrowseFolderMenuItem;
+        private ToolStripMenuItem recentUpksMenuItem;
+        private ToolStripMenuItem clearRecentUpksMenuItem;
         private ToolStripMenuItem saveMenuItem;
         private ToolStripMenuItem darkModeMenuItem;
         private TabPage namePage;

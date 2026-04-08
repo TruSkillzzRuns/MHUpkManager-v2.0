@@ -1,6 +1,7 @@
 using MHUpkManager.Models;
 using MHUpkManager.BackupManager;
 using MHUpkManager.MeshExporter;
+using MHUpkManager.EnemyConverter;
 using MHUpkManager.MeshImporter;
 using MHUpkManager.MeshPreview;
 using MHUpkManager.MeshSections;
@@ -14,6 +15,7 @@ using MHUpkManager.TexturePreview;
 using MHUpkManager.TextureManager;
 using MHUpkManager.TextureWorkspace;
 using MHUpkManager.UI;
+using MHUpkManager.UiEditor;
 using System.Media;
 using System.Numerics;
 using System.Reflection;
@@ -46,6 +48,7 @@ namespace MHUpkManager
         private HexViewForm hexViewForm;
         private TextureViewForm textureViewForm;
         private readonly MeshExporterPanel meshExporterPanel;
+        private readonly EnemyPlayablePanel enemyPlayablePanel;
         private readonly MeshImporterPanel meshImporterPanel;
         private readonly MeshPreviewUI meshPreviewPanel;
         private readonly MeshSectionToolUI meshSectionToolPanel;
@@ -58,6 +61,14 @@ namespace MHUpkManager
         private readonly CharacterTextureWorkflowUI characterTextureWorkflowPanel;
         private readonly TextureWorkspaceUI textureWorkspacePanel;
         private readonly SkeletalMeshRetargeterPanel skeletalMeshRetargeterPanel;
+        private readonly UiEditorPanel uiEditorPanel;
+        private readonly EnemyPlayableConverter enemyPlayableConverter;
+        private readonly UiEditorTool uiEditorTool;
+        private readonly UpkBrowsePreferencesStore upkBrowsePreferencesStore;
+        private readonly UpkBrowsePreferences upkBrowsePreferences;
+        private readonly Dictionary<string, UnrealExportTableEntry> enemyPlayableExports = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, EnemyScanCandidate> enemyPlayableScanCandidates = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, UnrealHeader> enemyPlayableHeaderCache = new(StringComparer.OrdinalIgnoreCase);
         private UnrealHeader meshExporterHeader;
         private readonly Dictionary<string, UnrealExportTableEntry> meshExporterExports = new(StringComparer.OrdinalIgnoreCase);
         private UnrealHeader meshImporterHeader;
@@ -97,6 +108,9 @@ namespace MHUpkManager
 
             repository = new UpkFileRepository();
             LoadPackageIndex();
+            enemyPlayableConverter = new EnemyPlayableConverter(repository);
+            upkBrowsePreferencesStore = new UpkBrowsePreferencesStore();
+            upkBrowsePreferences = upkBrowsePreferencesStore.Load();
 
             rootNodes = [];
 
@@ -110,6 +124,7 @@ namespace MHUpkManager
             textureViewForm = new TextureViewForm();
             textureViewForm.SendToTexturePreviewRequested = ShowTextureInPreviewTab;
             meshExporterPanel = new MeshExporterPanel();
+            enemyPlayablePanel = new EnemyPlayablePanel();
             meshImporterPanel = new MeshImporterPanel();
             meshPreviewPanel = new MeshPreviewUI();
             meshSectionToolPanel = new MeshSectionToolUI(meshPreviewPanel, GetCurrentUpkPath, GetCurrentSkeletalMeshExportPath);
@@ -127,15 +142,21 @@ namespace MHUpkManager
                 ClearCharacterTexturePreviewOnMesh);
             textureWorkspacePanel = new TextureWorkspaceUI(texturePreviewPanel, materialInspectorPanel, sectionMaterialMappingPanel, materialTextureSwapPanel, characterTextureWorkflowPanel);
             skeletalMeshRetargeterPanel = new SkeletalMeshRetargeterPanel();
+            uiEditorPanel = new UiEditorPanel();
+            uiEditorTool = new UiEditorTool();
             lastMainSplitterDistance = splitContainer1.SplitterDistance;
             InitializeObjectsWorkspaceUi();
+            InitializeMeshPreviewUi();
             InitializeMeshExporterUi();
+            InitializeEnemyPlayableUi();
             InitializeMeshImporterUi();
             InitializeMeshWorkspaceUi();
             InitializeBackupManagerUi();
             InitializeTextureWorkspaceUi();
             InitializeSkeletalMeshRetargeterUi();
+            InitializeUiEditorUi();
             LogRetargetBuildMarker();
+            RefreshRecentUpksMenu();
             tabControl2.SelectedIndexChanged += tabControl2_SelectedIndexChanged;
             UpdateMainLayoutForActiveTab();
             ApplyTheme();
@@ -574,17 +595,45 @@ namespace MHUpkManager
         private void InitializeMeshExporterUi()
         {
             meshExporterPanel.BrowseUpkRequested += async (_, _) => await BrowseMeshExporterUpkAsync().ConfigureAwait(true);
+            meshExporterPanel.UseCurrentUpkRequested += async (_, _) => await UseCurrentMeshExporterUpkAsync().ConfigureAwait(true);
             meshExporterPanel.BrowseFbxRequested += BrowseMeshExporterFbx;
             meshExporterPanel.SkeletalMeshChanged += async (_, _) => await RefreshMeshExporterLodsAsync().ConfigureAwait(true);
             meshExporterPanel.ExportRequested += async (_, _) => await ExportMeshFromPanelAsync().ConfigureAwait(true);
         }
 
+        private void InitializeMeshPreviewUi()
+        {
+            meshPreviewPanel.UseCurrentUpkRequested += async (_, _) => await UseCurrentMeshPreviewUpkAsync().ConfigureAwait(true);
+        }
+
         private void InitializeMeshImporterUi()
         {
             meshImporterPanel.BrowseUpkRequested += async (_, _) => await BrowseMeshImporterUpkAsync().ConfigureAwait(true);
+            meshImporterPanel.UseCurrentUpkRequested += async (_, _) => await UseCurrentMeshImporterUpkAsync().ConfigureAwait(true);
             meshImporterPanel.BrowseFbxRequested += BrowseMeshImporterFbx;
             meshImporterPanel.SkeletalMeshChanged += async (_, _) => await RefreshMeshImporterLodsAsync().ConfigureAwait(true);
             meshImporterPanel.ImportRequested += async (_, _) => await ImportMeshFromPanelAsync().ConfigureAwait(true);
+        }
+
+        private void InitializeEnemyPlayableUi()
+        {
+            TabPage enemyConverterPage = new()
+            {
+                Name = "enemyConverterPage",
+                Text = "Enemy Converter",
+                UseVisualStyleBackColor = true
+            };
+            enemyConverterPage.Controls.Add(enemyPlayablePanel);
+            tabControl2.Controls.Add(enemyConverterPage);
+
+            enemyPlayablePanel.SelectedMeshChanged += async (_, _) => await RefreshEnemyPlayableDetectionAsync().ConfigureAwait(true);
+            enemyPlayablePanel.ScanSelectionChanged += async (_, _) => await RefreshEnemyPlayableDetectionAsync().ConfigureAwait(true);
+            enemyPlayablePanel.ScanCurrentFolderRequested += async (_, _) => await ScanEnemyPlayableCurrentFolderAsync().ConfigureAwait(true);
+            enemyPlayablePanel.BrowseScanFolderRequested += async (_, _) => await BrowseEnemyPlayableScanFolderAsync().ConfigureAwait(true);
+            enemyPlayablePanel.ConvertRequested += async (_, _) => await ConvertEnemyToPlayableAsync().ConfigureAwait(true);
+
+            // TODO(enemy-converter-ui-registration): keep this tab wired into the workspace tab order if the tool navigation shell changes again.
+            // TODO(enemy-converter-menu-registration): add a dedicated menu entry if this workflow should be launchable without switching to the workspace tab.
         }
 
         private void InitializeMeshWorkspaceUi()
@@ -635,6 +684,7 @@ namespace MHUpkManager
             tabControl2.Controls.Add(retargeterPage);
 
             skeletalMeshRetargeterPanel.BrowseUpkRequested += async (_, _) => await BrowseRetargeterUpkAsync().ConfigureAwait(true);
+            skeletalMeshRetargeterPanel.UseCurrentUpkRequested += async (_, _) => await UseCurrentRetargeterUpkAsync().ConfigureAwait(true);
             skeletalMeshRetargeterPanel.SkeletalMeshChanged += async (_, _) => await RefreshRetargeterLodsAsync().ConfigureAwait(true);
             skeletalMeshRetargeterPanel.ImportMeshRequested += async (_, _) => await ImportRetargetMeshAsync().ConfigureAwait(true);
             skeletalMeshRetargeterPanel.ImportAnimSetRequested += async (_, _) => await ImportRetargetAnimSetAsync().ConfigureAwait(true);
@@ -657,6 +707,33 @@ namespace MHUpkManager
             skeletalMeshRetargeterPanel.CompatibilityFixRequested += (_, _) => ApplyRetargetCompatibilityFixes();
             skeletalMeshRetargeterPanel.ExportFbxRequested += async (_, _) => await ExportRetargetFbxAsync().ConfigureAwait(true);
             skeletalMeshRetargeterPanel.ReplaceMeshRequested += async (_, _) => await ReplaceRetargetMeshAsync().ConfigureAwait(true);
+        }
+
+        private void InitializeUiEditorUi()
+        {
+            TabPage uiEditorPage = new()
+            {
+                Name = "uiEditorPage",
+                Text = "UI Editor",
+                UseVisualStyleBackColor = true
+            };
+            uiEditorPage.Controls.Add(uiEditorPanel);
+            tabControl2.Controls.Add(uiEditorPage);
+
+            uiEditorPanel.BrowsePackageRequested += (_, _) => BrowseUiEditorPackage();
+            uiEditorPanel.UseCurrentPackageRequested += (_, _) => UseCurrentUiEditorPackage();
+            uiEditorPanel.ScanRequested += async (_, _) => await ScanUiEditorPackageAsync().ConfigureAwait(true);
+            uiEditorPanel.DryRunPatchRequested += async (_, _) => await CreateUiEditorDryRunPatchAsync().ConfigureAwait(true);
+            uiEditorPanel.ScanTextureAssetsRequested += async (_, _) => await ScanUiEditorTextureAssetsAsync().ConfigureAwait(true);
+            uiEditorPanel.PreviewTextureRequested += async (_, _) => await PreviewUiEditorTextureAssetAsync().ConfigureAwait(true);
+            uiEditorPanel.ExportTextureRequested += async (_, _) => await ExportUiEditorTextureAssetAsync().ConfigureAwait(true);
+            uiEditorPanel.ChooseReplacementRequested += (_, _) => ChooseUiEditorTextureReplacement();
+            uiEditorPanel.ApplyTextureReplacementRequested += async (_, _) => await ApplyUiEditorTextureReplacementAsync().ConfigureAwait(true);
+            uiEditorPanel.PreviewSwfRequested += async (_, _) => await PreviewUiEditorSwfAsync().ConfigureAwait(true);
+            uiEditorPanel.ExportSwfRawRequested += async (_, _) => await ExportUiEditorSwfAsync(UiEditorSwfTransferMode.RawExport).ConfigureAwait(true);
+            uiEditorPanel.ExportSwfEmbeddedRequested += async (_, _) => await ExportUiEditorSwfAsync(UiEditorSwfTransferMode.EmbeddedPayload).ConfigureAwait(true);
+            uiEditorPanel.ChooseSwfImportRequested += (_, _) => ChooseUiEditorSwfImport();
+            uiEditorPanel.ImportSwfRequested += async (_, _) => await ImportUiEditorSwfAsync().ConfigureAwait(true);
         }
 
         private void InitializeObjectsWorkspaceUi()
@@ -689,10 +766,12 @@ namespace MHUpkManager
                 string.Equals(activeTabName, "objectsPage", StringComparison.Ordinal) ||
                 string.Equals(activeTabName, "propertyFilePage", StringComparison.Ordinal);
             bool isToolWorkspace =
+                string.Equals(activeTabName, "enemyConverterPage", StringComparison.Ordinal) ||
                 string.Equals(activeTabName, "meshWorkspacePage", StringComparison.Ordinal) ||
                 string.Equals(activeTabName, "backupManagerPage", StringComparison.Ordinal) ||
                 string.Equals(activeTabName, "textureWorkspacePage", StringComparison.Ordinal) ||
-                string.Equals(activeTabName, "retargetWorkspacePage", StringComparison.Ordinal);
+                string.Equals(activeTabName, "retargetWorkspacePage", StringComparison.Ordinal) ||
+                string.Equals(activeTabName, "uiEditorPage", StringComparison.Ordinal);
 
             if (!isObjectsWorkspace)
             {
@@ -739,13 +818,760 @@ namespace MHUpkManager
             }
         }
 
-        private async Task BrowseMeshImporterUpkAsync()
+        private void RefreshEnemyPlayableExports()
         {
+            enemyPlayableExports.Clear();
+
+            if (UpkFile?.Header?.ExportTable == null)
+            {
+                enemyPlayablePanel.SetMeshOptions([]);
+                enemyPlayablePanel.ClearDetectedComponents();
+                return;
+            }
+
+            foreach (UnrealExportTableEntry export in UpkFile.Header.ExportTable)
+            {
+                if (!string.Equals(export.ClassReferenceNameIndex?.Name, "SkeletalMesh", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string path = export.GetPathName();
+                if (string.IsNullOrWhiteSpace(path))
+                    continue;
+
+                enemyPlayableExports[path] = export;
+            }
+
+            enemyPlayablePanel.SetMeshOptions(enemyPlayableExports.Keys);
+            enemyPlayablePanel.SetScanFolder(Path.GetDirectoryName(GetCurrentUpkPath()) ?? string.Empty);
+        }
+
+        private async Task RefreshEnemyPlayableDetectionAsync()
+        {
+            EnemyPlayableSelection selection = await GetEnemyPlayableSelectionAsync().ConfigureAwait(true);
+            if (selection == null)
+            {
+                enemyPlayablePanel.ClearDetectedComponents();
+                return;
+            }
+
+            try
+            {
+                enemyPlayablePanel.SetBusy(true);
+                EnemyComponentDetectionResult detection = await Task.Run(() => enemyPlayableConverter.DetectEnemyComponents(selection)).ConfigureAwait(true);
+
+                enemyPlayablePanel.SetDetectionResult(detection);
+                enemyPlayablePanel.SetLog(detection.Messages);
+            }
+            catch (Exception ex)
+            {
+                enemyPlayablePanel.ClearDetectedComponents();
+                enemyPlayablePanel.SetLog([$"Enemy Converter detection failed: {ex.Message}"]);
+                WarningBox($"Enemy Converter detection failed.\n\n{ex}");
+            }
+            finally
+            {
+                enemyPlayablePanel.SetBusy(false);
+            }
+        }
+
+        private async Task ConvertEnemyToPlayableAsync()
+        {
+            EnemyPlayableSelection selection = await GetEnemyPlayableSelectionAsync().ConfigureAwait(true);
+            if (selection == null)
+            {
+                WarningBox("Select an enemy SkeletalMesh export or choose a compatible scan result first.");
+                return;
+            }
+
+            try
+            {
+                Cursor.Current = Cursors.WaitCursor;
+                progressStatus.Text = "Converting enemy mesh into a playable hero bundle...";
+                enemyPlayablePanel.SetBusy(true);
+
+                EnemyPlayableConversionResult result = await Task.Run(() => enemyPlayableConverter.BuildPlayableHero(selection)).ConfigureAwait(true);
+
+                enemyPlayablePanel.SetDetectionResult(new EnemyComponentDetectionResult
+                {
+                    DependencyGraph = result.DependencyGraph,
+                    SkeletonCompatible = true,
+                    Messages = result.Messages
+                });
+                enemyPlayablePanel.SetLog(result.Messages);
+                progressStatus.Text = "Enemy converter completed.";
+
+                MessageBox.Show(
+                    $"Enemy converter output written to:\n{result.PackageResult.OutputDirectory}\n\nPatched game tables: {result.PatchPlan.PatchedFiles.Count}",
+                    "Enemy Converter Complete",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                progressStatus.Text = "Enemy converter failed.";
+                WarningBox($"Enemy Converter failed.\n\n{ex}");
+            }
+            finally
+            {
+                enemyPlayablePanel.SetBusy(false);
+                Cursor.Current = Cursors.Default;
+            }
+        }
+
+        private async Task ScanEnemyPlayableCurrentFolderAsync()
+        {
+            string currentUpkPath = GetCurrentUpkPath();
+            if (string.IsNullOrWhiteSpace(currentUpkPath))
+            {
+                WarningBox("Open a UPK file first so the Enemy Converter can scan that package folder.");
+                return;
+            }
+
+            string folderPath = Path.GetDirectoryName(currentUpkPath);
+            if (string.IsNullOrWhiteSpace(folderPath))
+            {
+                WarningBox("The current UPK folder could not be determined.");
+                return;
+            }
+
+            await ScanEnemyPlayableFolderAsync(folderPath).ConfigureAwait(true);
+        }
+
+        private async Task BrowseEnemyPlayableScanFolderAsync()
+        {
+            using FolderBrowserDialog dialog = new()
+            {
+                Description = "Select the UPK folder to scan for compatible enemy SkeletalMeshes.",
+                UseDescriptionForTitle = true
+            };
+
+            string currentUpkPath = GetCurrentUpkPath();
+            string initialPath = Path.GetDirectoryName(currentUpkPath);
+            if (!string.IsNullOrWhiteSpace(initialPath) && Directory.Exists(initialPath))
+                dialog.InitialDirectory = initialPath;
+
+            if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath))
+                return;
+
+            await ScanEnemyPlayableFolderAsync(dialog.SelectedPath).ConfigureAwait(true);
+        }
+
+        private async Task ScanEnemyPlayableFolderAsync(string folderPath)
+        {
+            try
+            {
+                Cursor.Current = Cursors.WaitCursor;
+                progressStatus.Text = "Scanning UPK folder for compatible enemy meshes...";
+                enemyPlayablePanel.SetBusy(true);
+                enemyPlayablePanel.SetScanFolder(folderPath);
+                enemyPlayablePanel.SetLog([$"Enemy Converter: scanning {folderPath}..."]);
+
+                EnemyScanSummary summary = await Task.Run(() => enemyPlayableConverter.ScanFolderForPlayableEnemies(folderPath, _ => { })).ConfigureAwait(true);
+
+                enemyPlayableScanCandidates.Clear();
+                foreach (EnemyScanCandidate candidate in summary.Candidates)
+                {
+                    if (!string.IsNullOrWhiteSpace(candidate.SelectionKey))
+                        enemyPlayableScanCandidates[candidate.SelectionKey] = candidate;
+                }
+
+                enemyPlayablePanel.SetScanResults(summary);
+                List<string> logLines =
+                [
+                    $"Enemy Converter: scanned {summary.Candidates.Count} candidates in {summary.FolderPath}.",
+                    $"Ready={summary.ReadyCount}, Warning={summary.WarningCount}, Incompatible={summary.IncompatibleCount}, Error={summary.ErrorCount}"
+                ];
+                foreach (EnemyScanCandidate candidate in summary.Candidates.Where(static item => item.Status == EnemyScanCompatibilityStatus.Ready || item.Status == EnemyScanCompatibilityStatus.Warning).Take(25))
+                    logLines.Add($"{candidate.Status}: {candidate.DisplayName} | {candidate.WarningSummary}");
+
+                enemyPlayablePanel.SetLog(logLines);
+                progressStatus.Text = "Enemy converter scan completed.";
+                await RefreshEnemyPlayableDetectionAsync().ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                progressStatus.Text = "Enemy converter scan failed.";
+                enemyPlayablePanel.SetLog([$"Enemy Converter scan failed: {ex.Message}"]);
+                WarningBox($"Enemy Converter scan failed.\n\n{ex}");
+            }
+            finally
+            {
+                enemyPlayablePanel.SetBusy(false);
+                Cursor.Current = Cursors.Default;
+            }
+        }
+
+        private void BrowseUiEditorPackage()
+        {
+            string preferredFolder = GetPreferredUpkBrowseFolder();
+            List<string> candidatePackages = GetUiPackageCandidates(preferredFolder);
+            if (candidatePackages.Count > 0)
+            {
+                using UiPackageSelectionForm selectionForm = new(candidatePackages, preferredFolder);
+                DialogResult result = selectionForm.ShowDialog(this);
+                if (result == DialogResult.OK && !string.IsNullOrWhiteSpace(selectionForm.SelectedPackagePath))
+                {
+                    uiEditorPanel.SetPackagePath(selectionForm.SelectedPackagePath);
+                    uiEditorPanel.AppendLog($"UI Editor: selected package {selectionForm.SelectedPackagePath}");
+                    return;
+                }
+
+                if (result != DialogResult.Retry)
+                    return;
+            }
+
+            using OpenFileDialog dialog = CreateUpkOpenDialog("Select Cooked UI Package", "Cooked UI Packages (*.upk)|*.upk");
+            if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.FileName))
+                return;
+
+            uiEditorPanel.SetPackagePath(dialog.FileName);
+            uiEditorPanel.AppendLog($"UI Editor: selected package {dialog.FileName}");
+        }
+
+        private void UseCurrentUiEditorPackage()
+        {
+            string currentUpkPath = GetCurrentUpkPath();
+            if (string.IsNullOrWhiteSpace(currentUpkPath))
+            {
+                WarningBox("Open a UPK file first, or browse directly to a cooked UI package.");
+                return;
+            }
+
+            uiEditorPanel.SetPackagePath(currentUpkPath);
+            uiEditorPanel.AppendLog($"UI Editor: using current package {currentUpkPath}");
+        }
+
+        private async Task ScanUiEditorPackageAsync()
+        {
+            string packagePath = uiEditorPanel.PackagePath;
+            if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
+            {
+                WarningBox("Pick a cooked UI package first.");
+                return;
+            }
+
+            try
+            {
+                Cursor.Current = Cursors.WaitCursor;
+                progressStatus.Text = "Scanning cooked UI package...";
+                uiEditorPanel.SetBusy(true);
+                uiEditorPanel.SetLog([$"UI Editor: scanning {packagePath}"]);
+
+                IReadOnlyList<EnemyClientUiTarget> targets = await uiEditorTool
+                    .ScanPackageAsync(packagePath, uiEditorPanel.SubjectName)
+                    .ConfigureAwait(true);
+
+                uiEditorPanel.SetTargets(targets);
+                uiEditorPanel.AppendLog($"UI Editor: found {targets.Count} matching exports in {Path.GetFileName(packagePath)}.");
+                progressStatus.Text = "UI package scan completed.";
+            }
+            catch (Exception ex)
+            {
+                progressStatus.Text = "UI package scan failed.";
+                uiEditorPanel.AppendLog($"UI Editor scan failed: {ex.Message}");
+                WarningBox($"UI Editor scan failed.\n\n{ex}");
+            }
+            finally
+            {
+                uiEditorPanel.SetBusy(false);
+                Cursor.Current = Cursors.Default;
+            }
+        }
+
+        private async Task CreateUiEditorDryRunPatchAsync()
+        {
+            string packagePath = uiEditorPanel.PackagePath;
+            if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
+            {
+                WarningBox("Pick a cooked UI package first.");
+                return;
+            }
+
+            try
+            {
+                Cursor.Current = Cursors.WaitCursor;
+                progressStatus.Text = "Creating UI dry-run patched copy...";
+                uiEditorPanel.SetBusy(true);
+
+                string outputDirectory = GetUiEditorOutputDirectory(packagePath);
+                EnemyClientUiPatchExperimentResult result = await uiEditorTool
+                    .CreateDryRunPatchedCopyAsync(packagePath, uiEditorPanel.SubjectName, outputDirectory, uiEditorPanel.AppendLog)
+                    .ConfigureAwait(true);
+
+                progressStatus.Text = "UI dry-run patched copy created.";
+                MessageBox.Show(
+                    $"UI Editor dry-run output written to:\n{result.OutputPackagePath}\n\nReport:\n{result.ReportPath}",
+                    "UI Editor",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                progressStatus.Text = "UI dry-run patch failed.";
+                uiEditorPanel.AppendLog($"UI Editor dry-run patch failed: {ex.Message}");
+                WarningBox($"UI Editor dry-run patch failed.\n\n{ex}");
+            }
+            finally
+            {
+                uiEditorPanel.SetBusy(false);
+                Cursor.Current = Cursors.Default;
+            }
+        }
+
+        private async Task ScanUiEditorTextureAssetsAsync()
+        {
+            string packagePath = uiEditorPanel.PackagePath;
+            if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
+            {
+                WarningBox("Pick a cooked UI package first.");
+                return;
+            }
+
+            try
+            {
+                Cursor.Current = Cursors.WaitCursor;
+                progressStatus.Text = "Scanning UI image assets...";
+                uiEditorPanel.SetBusy(true);
+
+                IReadOnlyList<UiEditorTextureAsset> assets = await uiEditorTool
+                    .ScanTextureAssetsAsync(packagePath, uiEditorPanel.SubjectName)
+                    .ConfigureAwait(true);
+
+                uiEditorPanel.SetTextureAssets(assets);
+                uiEditorPanel.AppendLog($"UI Editor: found {assets.Count} Texture2D asset(s) in {Path.GetFileName(packagePath)}.");
+                progressStatus.Text = "UI image asset scan completed.";
+            }
+            catch (Exception ex)
+            {
+                progressStatus.Text = "UI image asset scan failed.";
+                uiEditorPanel.AppendLog($"UI Editor image asset scan failed: {ex.Message}");
+                WarningBox($"UI Editor image asset scan failed.\n\n{ex}");
+            }
+            finally
+            {
+                uiEditorPanel.SetBusy(false);
+                Cursor.Current = Cursors.Default;
+            }
+        }
+
+        private void ChooseUiEditorTextureReplacement()
+        {
+            if (uiEditorPanel.SelectedTextureAsset == null)
+            {
+                WarningBox("Select a Texture2D asset first.");
+                return;
+            }
+
             using OpenFileDialog dialog = new()
             {
-                Filter = "Unreal Package Files (*.upk)|*.upk",
-                Title = "Select UPK for Mesh Importer"
+                Filter = "Texture Files|*.png;*.jpg;*.jpeg;*.dds;*.tga",
+                Title = $"Select Replacement For {uiEditorPanel.SelectedTextureAsset.ExportPath}"
             };
+
+            if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.FileName))
+                return;
+
+            uiEditorPanel.SetTextureReplacementFile(dialog.FileName);
+            uiEditorPanel.AppendLog($"UI Editor: assigned replacement file {dialog.FileName}.");
+        }
+
+        private async Task PreviewUiEditorTextureAssetAsync()
+        {
+            string packagePath = uiEditorPanel.PackagePath;
+            UiEditorTextureAsset asset = uiEditorPanel.SelectedTextureAsset;
+            if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
+            {
+                WarningBox("Pick a cooked UI package first.");
+                return;
+            }
+
+            if (asset == null)
+            {
+                WarningBox("Select a Texture2D asset first.");
+                return;
+            }
+
+            try
+            {
+                Cursor.Current = Cursors.WaitCursor;
+                progressStatus.Text = "Loading UI image preview...";
+                uiEditorPanel.SetBusy(true);
+
+                using TexturePreviewTexture texture = await uiEditorTool
+                    .LoadTexturePreviewAsync(packagePath, asset, uiEditorPanel.AppendLog)
+                    .ConfigureAwait(true);
+
+                using UiImagePreviewForm previewForm = new(texture);
+                previewForm.ShowDialog(this);
+                uiEditorPanel.AppendLog($"UI Editor: previewed {asset.ExportPath}.");
+                progressStatus.Text = "UI image preview loaded.";
+            }
+            catch (Exception ex)
+            {
+                progressStatus.Text = "UI image preview failed.";
+                uiEditorPanel.AppendLog($"UI Editor image preview failed: {ex.Message}");
+                WarningBox($"UI Editor image preview failed.\n\n{ex}");
+            }
+            finally
+            {
+                uiEditorPanel.SetBusy(false);
+                Cursor.Current = Cursors.Default;
+            }
+        }
+
+        private async Task ExportUiEditorTextureAssetAsync()
+        {
+            string packagePath = uiEditorPanel.PackagePath;
+            UiEditorTextureAsset asset = uiEditorPanel.SelectedTextureAsset;
+            if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
+            {
+                WarningBox("Pick a cooked UI package first.");
+                return;
+            }
+
+            if (asset == null)
+            {
+                WarningBox("Select a Texture2D asset first.");
+                return;
+            }
+
+            using SaveFileDialog dialog = new()
+            {
+                Filter = "PNG Image (*.png)|*.png|DDS Container (*.dds)|*.dds|Bitmap (*.bmp)|*.bmp|JPEG Image (*.jpg)|*.jpg",
+                Title = $"Export {asset.ExportPath}",
+                FileName = $"{SanitizeExportFileName(asset.ExportPath.Replace('.', '_'))}.png"
+            };
+
+            if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.FileName))
+                return;
+
+            try
+            {
+                Cursor.Current = Cursors.WaitCursor;
+                progressStatus.Text = "Exporting UI image asset...";
+                uiEditorPanel.SetBusy(true);
+
+                await uiEditorTool.ExportTextureAssetAsync(packagePath, asset, dialog.FileName, uiEditorPanel.AppendLog)
+                    .ConfigureAwait(true);
+
+                progressStatus.Text = "UI image asset exported.";
+                MessageBox.Show(
+                    $"Exported image asset:\n{asset.ExportPath}\n\nOutput:\n{dialog.FileName}",
+                    "UI Editor",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                progressStatus.Text = "UI image export failed.";
+                uiEditorPanel.AppendLog($"UI Editor image export failed: {ex.Message}");
+                WarningBox($"UI Editor image export failed.\n\n{ex}");
+            }
+            finally
+            {
+                uiEditorPanel.SetBusy(false);
+                Cursor.Current = Cursors.Default;
+            }
+        }
+
+        private async Task ApplyUiEditorTextureReplacementAsync()
+        {
+            string packagePath = uiEditorPanel.PackagePath;
+            UiEditorTextureAsset asset = uiEditorPanel.SelectedTextureAsset;
+            if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
+            {
+                WarningBox("Pick a cooked UI package first.");
+                return;
+            }
+
+            if (asset == null)
+            {
+                WarningBox("Select a Texture2D asset first.");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(asset.ReplacementFilePath) || !File.Exists(asset.ReplacementFilePath))
+            {
+                WarningBox("Choose a replacement image first.");
+                return;
+            }
+
+            try
+            {
+                Cursor.Current = Cursors.WaitCursor;
+                progressStatus.Text = "Applying UI image replacement...";
+                uiEditorPanel.SetBusy(true);
+                uiEditorPanel.AppendLog($"UI Editor: injecting {asset.ReplacementFilePath} into {asset.ExportPath}.");
+
+                await uiEditorTool.InjectTextureAssetAsync(packagePath, asset, uiEditorPanel.AppendLog).ConfigureAwait(true);
+
+                progressStatus.Text = "UI image replacement applied.";
+                MessageBox.Show(
+                    $"Applied replacement image to:\n{asset.ExportPath}\n\nPackage:\n{packagePath}",
+                    "UI Editor",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                progressStatus.Text = "UI image replacement failed.";
+                uiEditorPanel.AppendLog($"UI Editor image replacement failed: {ex.Message}");
+                WarningBox($"UI Editor image replacement failed.\n\n{ex}");
+            }
+            finally
+            {
+                uiEditorPanel.SetBusy(false);
+                Cursor.Current = Cursors.Default;
+            }
+        }
+
+        private async Task PreviewUiEditorSwfAsync()
+        {
+            string packagePath = uiEditorPanel.PackagePath;
+            EnemyClientUiTarget target = uiEditorPanel.SelectedTarget;
+            if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
+            {
+                WarningBox("Pick a cooked UI package first.");
+                return;
+            }
+
+            if (target == null || !string.Equals(target.ClassName, "swfmovie", StringComparison.OrdinalIgnoreCase))
+            {
+                WarningBox("Select a swfmovie export first.");
+                return;
+            }
+
+            try
+            {
+                Cursor.Current = Cursors.WaitCursor;
+                progressStatus.Text = "Inspecting SWF export...";
+                uiEditorPanel.SetBusy(true);
+
+                UiEditorSwfPreview preview = await uiEditorTool.PreviewSwfMovieAsync(packagePath, target).ConfigureAwait(true);
+                uiEditorPanel.SetSwfPreview(preview.BuildSummaryText());
+                uiEditorPanel.AppendLog($"UI Editor: previewed SWF export {target.ExportPath}.");
+                progressStatus.Text = "SWF export preview loaded.";
+            }
+            catch (Exception ex)
+            {
+                progressStatus.Text = "SWF preview failed.";
+                uiEditorPanel.AppendLog($"UI Editor SWF preview failed: {ex.Message}");
+                WarningBox($"UI Editor SWF preview failed.\n\n{ex}");
+            }
+            finally
+            {
+                uiEditorPanel.SetBusy(false);
+                Cursor.Current = Cursors.Default;
+            }
+        }
+
+        private async Task ExportUiEditorSwfAsync(UiEditorSwfTransferMode mode)
+        {
+            string packagePath = uiEditorPanel.PackagePath;
+            EnemyClientUiTarget target = uiEditorPanel.SelectedTarget;
+            if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
+            {
+                WarningBox("Pick a cooked UI package first.");
+                return;
+            }
+
+            if (target == null || !string.Equals(target.ClassName, "swfmovie", StringComparison.OrdinalIgnoreCase))
+            {
+                WarningBox("Select a swfmovie export first.");
+                return;
+            }
+
+            string defaultExtension = mode == UiEditorSwfTransferMode.RawExport ? "bin" : "swf";
+            using SaveFileDialog dialog = new()
+            {
+                Filter = mode == UiEditorSwfTransferMode.RawExport
+                    ? "Raw Export (*.bin)|*.bin|All Files (*.*)|*.*"
+                    : "SWF / GFX (*.swf;*.gfx)|*.swf;*.gfx|All Files (*.*)|*.*",
+                Title = mode == UiEditorSwfTransferMode.RawExport ? "Export Raw SWF Export" : "Export Embedded SWF/GFX",
+                FileName = $"{SanitizeExportFileName(target.ExportPath.Replace('.', '_'))}.{defaultExtension}"
+            };
+
+            if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.FileName))
+                return;
+
+            try
+            {
+                Cursor.Current = Cursors.WaitCursor;
+                progressStatus.Text = "Exporting SWF export...";
+                uiEditorPanel.SetBusy(true);
+
+                await uiEditorTool.ExportSwfMovieAsync(packagePath, target, dialog.FileName, mode, uiEditorPanel.AppendLog)
+                    .ConfigureAwait(true);
+
+                progressStatus.Text = "SWF export completed.";
+                MessageBox.Show(
+                    $"Exported {target.ExportPath} to:\n{dialog.FileName}",
+                    "UI Editor",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                progressStatus.Text = "SWF export failed.";
+                uiEditorPanel.AppendLog($"UI Editor SWF export failed: {ex.Message}");
+                WarningBox($"UI Editor SWF export failed.\n\n{ex}");
+            }
+            finally
+            {
+                uiEditorPanel.SetBusy(false);
+                Cursor.Current = Cursors.Default;
+            }
+        }
+
+        private void ChooseUiEditorSwfImport()
+        {
+            EnemyClientUiTarget target = uiEditorPanel.SelectedTarget;
+            if (target == null || !string.Equals(target.ClassName, "swfmovie", StringComparison.OrdinalIgnoreCase))
+            {
+                WarningBox("Select a swfmovie export first.");
+                return;
+            }
+
+            using OpenFileDialog dialog = new()
+            {
+                Filter = "SWF / GFX / Raw Export|*.swf;*.gfx;*.bin|All Files (*.*)|*.*",
+                Title = $"Choose Import File For {target.ExportPath}"
+            };
+
+            if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.FileName))
+                return;
+
+            uiEditorPanel.SetSwfImportFile(dialog.FileName);
+            uiEditorPanel.AppendLog($"UI Editor: assigned SWF import file {dialog.FileName}.");
+        }
+
+        private async Task ImportUiEditorSwfAsync()
+        {
+            string packagePath = uiEditorPanel.PackagePath;
+            EnemyClientUiTarget target = uiEditorPanel.SelectedTarget;
+            string importPath = uiEditorPanel.SwfImportFilePath;
+            if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
+            {
+                WarningBox("Pick a cooked UI package first.");
+                return;
+            }
+
+            if (target == null || !string.Equals(target.ClassName, "swfmovie", StringComparison.OrdinalIgnoreCase))
+            {
+                WarningBox("Select a swfmovie export first.");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(importPath) || !File.Exists(importPath))
+            {
+                WarningBox("Choose an import file first.");
+                return;
+            }
+
+            UiEditorSwfTransferMode mode = Path.GetExtension(importPath).Equals(".bin", StringComparison.OrdinalIgnoreCase)
+                ? UiEditorSwfTransferMode.RawExport
+                : UiEditorSwfTransferMode.EmbeddedPayload;
+
+            DialogResult confirm = MessageBox.Show(
+                $"This will replace the selected swfmovie export inside:\n{packagePath}\n\nA backup will be written next to it as:\n{packagePath}.bak\n\nContinue?",
+                "Re-Import SWF Export",
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Warning);
+
+            if (confirm != DialogResult.OK)
+                return;
+
+            try
+            {
+                Cursor.Current = Cursors.WaitCursor;
+                progressStatus.Text = "Re-importing SWF export...";
+                uiEditorPanel.SetBusy(true);
+
+                string backupPath = await uiEditorTool.ImportSwfMovieAsync(packagePath, target, importPath, mode, uiEditorPanel.AppendLog)
+                    .ConfigureAwait(true);
+
+                progressStatus.Text = "SWF export re-imported.";
+                MessageBox.Show(
+                    $"Re-imported {target.ExportPath}.\n\nPackage:\n{packagePath}\n\nBackup:\n{backupPath}",
+                    "UI Editor",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                progressStatus.Text = "SWF re-import failed.";
+                uiEditorPanel.AppendLog($"UI Editor SWF re-import failed: {ex.Message}");
+                WarningBox($"UI Editor SWF re-import failed.\n\n{ex}");
+            }
+            finally
+            {
+                uiEditorPanel.SetBusy(false);
+                Cursor.Current = Cursors.Default;
+            }
+        }
+
+        private static string GetUiEditorOutputDirectory(string packagePath)
+        {
+            string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            string packageName = Path.GetFileNameWithoutExtension(packagePath);
+            string timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            return Path.Combine(desktopPath, "MHUPKManager Output", "UiEditor", packageName, timestamp);
+        }
+
+        private async Task<EnemyPlayableSelection> GetEnemyPlayableSelectionAsync()
+        {
+            EnemyScanCandidate scanCandidate = enemyPlayablePanel.SelectedScanCandidate;
+            if (scanCandidate != null && !string.IsNullOrWhiteSpace(scanCandidate.SourceUpkPath) && !string.IsNullOrWhiteSpace(scanCandidate.MeshExportPath))
+            {
+                UnrealHeader header = await GetEnemyPlayableHeaderAsync(scanCandidate.SourceUpkPath).ConfigureAwait(true);
+                UnrealExportTableEntry meshExport = header?.ExportTable?
+                    .FirstOrDefault(export => string.Equals(export.GetPathName(), scanCandidate.MeshExportPath, StringComparison.OrdinalIgnoreCase));
+
+                if (header != null && meshExport != null)
+                {
+                    return new EnemyPlayableSelection
+                    {
+                        Header = header,
+                        MeshExport = meshExport,
+                        SourceUpkPath = scanCandidate.SourceUpkPath
+                    };
+                }
+            }
+
+            if (UpkFile?.Header == null || string.IsNullOrWhiteSpace(enemyPlayablePanel.SelectedMeshName))
+                return null;
+
+            if (!enemyPlayableExports.TryGetValue(enemyPlayablePanel.SelectedMeshName, out UnrealExportTableEntry currentMeshExport))
+                return null;
+
+            return new EnemyPlayableSelection
+            {
+                Header = UpkFile.Header,
+                MeshExport = currentMeshExport,
+                SourceUpkPath = GetCurrentUpkPath()
+            };
+        }
+
+        private async Task<UnrealHeader> GetEnemyPlayableHeaderAsync(string upkPath)
+        {
+            if (string.IsNullOrWhiteSpace(upkPath))
+                return null;
+
+            string currentUpkPath = GetCurrentUpkPath();
+            if (!string.IsNullOrWhiteSpace(currentUpkPath) && string.Equals(currentUpkPath, upkPath, StringComparison.OrdinalIgnoreCase) && UpkFile?.Header != null)
+                return UpkFile.Header;
+
+            if (enemyPlayableHeaderCache.TryGetValue(upkPath, out UnrealHeader cachedHeader))
+                return cachedHeader;
+
+            UnrealHeader header = await repository.LoadUpkFile(upkPath).ConfigureAwait(true);
+            enemyPlayableHeaderCache[upkPath] = header;
+            return header;
+        }
+
+        private async Task BrowseMeshImporterUpkAsync()
+        {
+            using OpenFileDialog dialog = CreateUpkOpenDialog("Select UPK for Mesh Importer");
 
             if (dialog.ShowDialog() != DialogResult.OK)
                 return;
@@ -754,13 +1580,22 @@ namespace MHUpkManager
             await LoadMeshImporterExportsAsync(dialog.FileName).ConfigureAwait(true);
         }
 
+        private async Task UseCurrentMeshImporterUpkAsync()
+        {
+            string currentUpkPath = GetCurrentUpkPath();
+            if (string.IsNullOrWhiteSpace(currentUpkPath))
+            {
+                WarningBox("Open a UPK file first.");
+                return;
+            }
+
+            meshImporterPanel.UpkPath = currentUpkPath;
+            await LoadMeshImporterExportsAsync(currentUpkPath).ConfigureAwait(true);
+        }
+
         private async Task BrowseMeshExporterUpkAsync()
         {
-            using OpenFileDialog dialog = new()
-            {
-                Filter = "Unreal Package Files (*.upk)|*.upk",
-                Title = "Select UPK for Mesh Exporter"
-            };
+            using OpenFileDialog dialog = CreateUpkOpenDialog("Select UPK for Mesh Exporter");
 
             if (dialog.ShowDialog() != DialogResult.OK)
                 return;
@@ -769,19 +1604,70 @@ namespace MHUpkManager
             await LoadMeshExporterExportsAsync(dialog.FileName).ConfigureAwait(true);
         }
 
+        private async Task UseCurrentMeshExporterUpkAsync()
+        {
+            string currentUpkPath = GetCurrentUpkPath();
+            if (string.IsNullOrWhiteSpace(currentUpkPath))
+            {
+                WarningBox("Open a UPK file first.");
+                return;
+            }
+
+            meshExporterPanel.UpkPath = currentUpkPath;
+            await LoadMeshExporterExportsAsync(currentUpkPath).ConfigureAwait(true);
+        }
+
         private async Task BrowseRetargeterUpkAsync()
         {
-            using OpenFileDialog dialog = new()
-            {
-                Filter = "Unreal Package Files (*.upk)|*.upk",
-                Title = "Select UPK for SkeletalMesh Retargeter"
-            };
+            using OpenFileDialog dialog = CreateUpkOpenDialog("Select UPK for SkeletalMesh Retargeter");
 
             if (dialog.ShowDialog() != DialogResult.OK)
                 return;
 
             skeletalMeshRetargeterPanel.UpkPath = dialog.FileName;
             await LoadRetargeterExportsAsync(dialog.FileName).ConfigureAwait(true);
+        }
+
+        private async Task UseCurrentRetargeterUpkAsync()
+        {
+            string currentUpkPath = GetCurrentUpkPath();
+            if (string.IsNullOrWhiteSpace(currentUpkPath))
+            {
+                WarningBox("Open a UPK file first.");
+                return;
+            }
+
+            skeletalMeshRetargeterPanel.UpkPath = currentUpkPath;
+            await LoadRetargeterExportsAsync(currentUpkPath).ConfigureAwait(true);
+        }
+
+        private async Task UseCurrentMeshPreviewUpkAsync()
+        {
+            string currentUpkPath = GetCurrentUpkPath();
+            if (string.IsNullOrWhiteSpace(currentUpkPath))
+            {
+                WarningBox("Open a UPK file first.");
+                return;
+            }
+
+            string exportPath = GetCurrentSkeletalMeshExportPath();
+            if (string.IsNullOrWhiteSpace(exportPath))
+                exportPath = await meshPreviewPanel.PromptForSkeletalMeshExportAsync(currentUpkPath).ConfigureAwait(true);
+
+            if (string.IsNullOrWhiteSpace(exportPath))
+                return;
+
+            try
+            {
+                progressStatus.Text = "Loading current UPK SkeletalMesh into Mesh Preview...";
+                await meshPreviewPanel.LoadUe3MeshFromUpkAsync(currentUpkPath, exportPath).ConfigureAwait(true);
+                progressStatus.Text = "Mesh Preview loaded current UPK SkeletalMesh.";
+            }
+            catch (Exception ex)
+            {
+                progressStatus.Text = "Mesh Preview failed to load current UPK SkeletalMesh.";
+                WarningBox($"Mesh Preview failed to load the current UPK SkeletalMesh.\n\n{ex}");
+            }
         }
 
         private void BrowseMeshImporterFbx(object sender, EventArgs e)
@@ -880,15 +1766,20 @@ namespace MHUpkManager
 
         private async Task ExportMeshFromPanelAsync()
         {
-            if (string.IsNullOrWhiteSpace(meshExporterPanel.UpkPath) ||
-                string.IsNullOrWhiteSpace(meshExporterPanel.FbxPath) ||
-                string.IsNullOrWhiteSpace(meshExporterPanel.SelectedMeshName))
+            string exportUpkPath = meshExporterPanel.UpkPath;
+            string exportFbxPath = meshExporterPanel.FbxPath;
+            string exportMeshName = meshExporterPanel.SelectedMeshName;
+            int exportLodIndex = meshExporterPanel.SelectedLodIndex;
+
+            if (string.IsNullOrWhiteSpace(exportUpkPath) ||
+                string.IsNullOrWhiteSpace(exportFbxPath) ||
+                string.IsNullOrWhiteSpace(exportMeshName))
             {
                 WarningBox("Select a UPK file, SkeletalMesh export, and output FBX path first.");
                 return;
             }
 
-            if (!meshExporterExports.TryGetValue(meshExporterPanel.SelectedMeshName, out UnrealExportTableEntry export))
+            if (!meshExporterExports.TryGetValue(exportMeshName, out UnrealExportTableEntry export))
             {
                 WarningBox("The selected SkeletalMesh export is no longer available.");
                 return;
@@ -909,22 +1800,22 @@ namespace MHUpkManager
                     throw new InvalidOperationException("The selected export is not a SkeletalMesh.");
                 }
 
-                meshExporterPanel.ReportProgress(20, 100, $"Loaded SkeletalMesh '{meshExporterPanel.SelectedMeshName}'.");
-                meshExporterPanel.ReportProgress(40, 100, $"Exporting LOD {meshExporterPanel.SelectedLodIndex} to FBX.");
+                meshExporterPanel.ReportProgress(20, 100, $"Loaded SkeletalMesh '{exportMeshName}'.");
+                meshExporterPanel.ReportProgress(40, 100, $"Exporting LOD {exportLodIndex} to FBX.");
 
                 await Task.Run(() =>
                 {
                     SkeletalFbxExporter.Export(
-                        meshExporterPanel.FbxPath,
+                        exportFbxPath,
                         skeletalMesh,
-                        meshExporterPanel.SelectedMeshName,
-                        meshExporterPanel.SelectedLodIndex,
+                        exportMeshName,
+                        exportLodIndex,
                         meshExporterPanel.AppendLog);
                 }).ConfigureAwait(true);
 
                 meshExporterPanel.ReportProgress(100, 100, "FBX export completed.");
                 MessageBox.Show(
-                    $"SkeletalMesh export completed.\n\nExported:\n{meshExporterPanel.SelectedMeshName}\n\nSaved to:\n{meshExporterPanel.FbxPath}",
+                    $"SkeletalMesh export completed.\n\nExported:\n{exportMeshName}\n\nSaved to:\n{exportFbxPath}",
                     "Mesh Exporter",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -2368,9 +3259,7 @@ namespace MHUpkManager
 
         private async void openMenuItem_Click(object sender, EventArgs e)
         {
-            using var openFileDialog = new OpenFileDialog();
-            openFileDialog.Filter = "Unreal Package Files (*.upk)|*.upk";
-            openFileDialog.Title = "Open Upk file";
+            using OpenFileDialog openFileDialog = CreateUpkOpenDialog("Open Upk file");
 
             if (openFileDialog.ShowDialog() == DialogResult.OK)
             {
@@ -2384,6 +3273,7 @@ namespace MHUpkManager
             {
                 Cursor.Current = Cursors.WaitCursor;
                 UpkFile = await OpenUpkFile(filePath);
+                RememberRecentUpk(filePath);
                 Text = $"{AppName} - [{UpkFile.GameFilename}]";
                 await LoadUpkFile(UpkFile);
 
@@ -2393,6 +3283,160 @@ namespace MHUpkManager
             {
                 Cursor.Current = Cursors.Default;
             }
+        }
+
+        private OpenFileDialog CreateUpkOpenDialog(string title, string filter = "Unreal Package Files (*.upk)|*.upk")
+        {
+            OpenFileDialog dialog = new()
+            {
+                Filter = filter,
+                Title = title
+            };
+
+            string initialDirectory = GetPreferredUpkBrowseFolder();
+            if (!string.IsNullOrWhiteSpace(initialDirectory) && Directory.Exists(initialDirectory))
+                dialog.InitialDirectory = initialDirectory;
+
+            return dialog;
+        }
+
+        private string GetPreferredUpkBrowseFolder()
+        {
+            string currentUpkPath = GetCurrentUpkPath();
+            string currentFolder = Path.GetDirectoryName(currentUpkPath);
+            if (!string.IsNullOrWhiteSpace(currentFolder) && Directory.Exists(currentFolder))
+                return currentFolder;
+
+            if (!string.IsNullOrWhiteSpace(upkBrowsePreferences.DefaultUpkFolder) && Directory.Exists(upkBrowsePreferences.DefaultUpkFolder))
+                return upkBrowsePreferences.DefaultUpkFolder;
+
+            string recentFolder = upkBrowsePreferences.RecentUpkPaths
+                .Select(Path.GetDirectoryName)
+                .FirstOrDefault(folder => !string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder));
+
+            return recentFolder;
+        }
+
+        private static List<string> GetUiPackageCandidates(string folderPath)
+        {
+            if (string.IsNullOrWhiteSpace(folderPath) || !Directory.Exists(folderPath))
+                return [];
+
+            static bool IsUiPackageName(string fileName)
+            {
+                string name = fileName ?? string.Empty;
+                return name.Contains("ui", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("hud", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("frontend", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("icon", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("roster", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("store", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("civilwarpanel", StringComparison.OrdinalIgnoreCase);
+            }
+
+            static int GetUiPackagePriority(string fileName)
+            {
+                return fileName switch
+                {
+                    var name when name.Contains("ICO__MarvelUIIcons", StringComparison.OrdinalIgnoreCase) => 0,
+                    var name when name.Contains("MarvelHUD", StringComparison.OrdinalIgnoreCase) => 1,
+                    var name when name.Contains("MarvelFrontEnd", StringComparison.OrdinalIgnoreCase) => 2,
+                    var name when name.Contains("Calligraphy", StringComparison.OrdinalIgnoreCase) => 3,
+                    _ => 10
+                };
+            }
+
+            return Directory.GetFiles(folderPath, "*.upk", SearchOption.TopDirectoryOnly)
+                .Where(path => IsUiPackageName(Path.GetFileName(path)))
+                .OrderBy(path => GetUiPackagePriority(Path.GetFileName(path)))
+                .ThenBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private void RememberRecentUpk(string filePath)
+        {
+            upkBrowsePreferencesStore.RegisterOpenedUpk(upkBrowsePreferences, filePath);
+            upkBrowsePreferencesStore.Save(upkBrowsePreferences);
+            RefreshRecentUpksMenu();
+        }
+
+        private void RefreshRecentUpksMenu()
+        {
+            recentUpksMenuItem.DropDownItems.Clear();
+
+            if (upkBrowsePreferences.RecentUpkPaths.Count == 0)
+            {
+                ToolStripMenuItem emptyItem = new("No recent UPKs")
+                {
+                    Enabled = false
+                };
+                recentUpksMenuItem.DropDownItems.Add(emptyItem);
+            }
+            else
+            {
+                foreach (string recentPath in upkBrowsePreferences.RecentUpkPaths.Where(File.Exists))
+                {
+                    string menuText = $"{Path.GetFileName(recentPath)}  |  {recentPath}";
+                    ToolStripMenuItem item = new(menuText)
+                    {
+                        Tag = recentPath
+                    };
+                    item.Click += recentUpkMenuItem_Click;
+                    recentUpksMenuItem.DropDownItems.Add(item);
+                }
+            }
+
+            recentUpksMenuItem.DropDownItems.Add(new ToolStripSeparator());
+            recentUpksMenuItem.DropDownItems.Add(clearRecentUpksMenuItem);
+        }
+
+        private async void recentUpkMenuItem_Click(object sender, EventArgs e)
+        {
+            if (sender is not ToolStripMenuItem menuItem || menuItem.Tag is not string filePath)
+                return;
+
+            if (!File.Exists(filePath))
+            {
+                WarningBox($"Recent UPK was not found:\n{filePath}");
+                upkBrowsePreferences.RecentUpkPaths.RemoveAll(path => string.Equals(path, filePath, StringComparison.OrdinalIgnoreCase));
+                upkBrowsePreferencesStore.Save(upkBrowsePreferences);
+                RefreshRecentUpksMenu();
+                return;
+            }
+
+            await OpenUpkFileFromPath(filePath, 0);
+        }
+
+        private void setUpkBrowseFolderMenuItem_Click(object sender, EventArgs e)
+        {
+            using FolderBrowserDialog dialog = new()
+            {
+                Description = "Select the default folder to use when browsing for UPK files.",
+                UseDescriptionForTitle = true
+            };
+
+            string initialFolder = GetPreferredUpkBrowseFolder();
+            if (!string.IsNullOrWhiteSpace(initialFolder) && Directory.Exists(initialFolder))
+                dialog.InitialDirectory = initialFolder;
+
+            if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath))
+                return;
+
+            upkBrowsePreferences.DefaultUpkFolder = dialog.SelectedPath;
+            upkBrowsePreferencesStore.Save(upkBrowsePreferences);
+            RefreshRecentUpksMenu();
+            MessageBox.Show(
+                $"Default UPK browse folder set to:\n{dialog.SelectedPath}",
+                "UPK Browse Folder",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+
+        private void clearRecentUpksMenuItem_Click(object sender, EventArgs e)
+        {
+            upkBrowsePreferencesStore.ClearRecents(upkBrowsePreferences);
+            upkBrowsePreferencesStore.Save(upkBrowsePreferences);
+            RefreshRecentUpksMenu();
         }
 
         private void SelectExportObject(int index)
@@ -2452,6 +3496,8 @@ namespace MHUpkManager
 
                 ViewEntities.BuildObjectTree(rootNodes, header);
                 UpdateObjectsTree();
+                RefreshEnemyPlayableExports();
+                // TODO(enemy-converter-upk-loading-hook): keep the converter mesh list in sync here whenever the active UPK lifecycle changes.
                 ApplyTheme();
             }
             finally

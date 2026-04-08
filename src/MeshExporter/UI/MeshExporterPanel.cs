@@ -22,6 +22,7 @@ internal sealed class MeshExporterPanel : UserControl
     private readonly Label _upkLabel;
     private readonly TextBox _upkPathTextBox;
     private readonly Button _browseUpkButton;
+    private readonly Button _useCurrentUpkButton;
     private readonly Label _skeletalMeshLabel;
     private readonly ComboBox _skeletalMeshComboBox;
     private readonly Button _refreshMeshesButton;
@@ -50,6 +51,8 @@ internal sealed class MeshExporterPanel : UserControl
         _upkPathTextBox = CreateTextBox();
         _browseUpkButton = CreateButton("Browse");
         _browseUpkButton.Click += (_, _) => BrowseUpkRequested?.Invoke(this, EventArgs.Empty);
+        _useCurrentUpkButton = CreateButton("Use Current UPK");
+        _useCurrentUpkButton.Click += (_, _) => UseCurrentUpkRequested?.Invoke(this, EventArgs.Empty);
 
         _skeletalMeshLabel = CreateLabel("SkeletalMesh Export:");
         _skeletalMeshComboBox = CreateComboBox();
@@ -98,6 +101,7 @@ internal sealed class MeshExporterPanel : UserControl
             _upkLabel,
             _upkPathTextBox,
             _browseUpkButton,
+            _useCurrentUpkButton,
             _skeletalMeshLabel,
             _skeletalMeshComboBox,
             _refreshMeshesButton,
@@ -120,6 +124,7 @@ internal sealed class MeshExporterPanel : UserControl
     }
 
     public event EventHandler BrowseUpkRequested;
+    public event EventHandler UseCurrentUpkRequested;
     public event EventHandler BrowseFbxRequested;
     public event EventHandler SkeletalMeshChanged;
     public event EventHandler ExportRequested;
@@ -167,6 +172,7 @@ internal sealed class MeshExporterPanel : UserControl
         }
 
         _browseUpkButton.Enabled = !isBusy;
+        _useCurrentUpkButton.Enabled = !isBusy;
         _browseFbxButton.Enabled = !isBusy;
         _refreshMeshesButton.Enabled = !isBusy;
         _skeletalMeshComboBox.Enabled = !isBusy;
@@ -266,7 +272,7 @@ internal sealed class MeshExporterPanel : UserControl
 
         Place(_sourceSectionLabel, OuterPadding, y, contentWidth, WorkspaceUiStyle.SectionHeaderHeight);
         y += WorkspaceUiStyle.SectionHeaderHeight + 4;
-        LayoutFieldRow(_upkLabel, _upkPathTextBox, _browseUpkButton, ref y, fieldWidth, contentWidth);
+        LayoutUpkFieldRow(ref y, fieldWidth, contentWidth);
         LayoutFieldRow(_skeletalMeshLabel, _skeletalMeshComboBox, _refreshMeshesButton, ref y, fieldWidth, contentWidth);
         y += SectionGap;
 
@@ -302,6 +308,17 @@ internal sealed class MeshExporterPanel : UserControl
         y += LabelHeight;
         Place(field, OuterPadding, y, fieldWidth, FieldHeight);
         Place(button, OuterPadding + fieldWidth + SideGap, y, ButtonWidth, FieldHeight);
+        y += FieldHeight + RowGap;
+    }
+
+    private void LayoutUpkFieldRow(ref int y, int fieldWidth, int contentWidth)
+    {
+        Place(_upkLabel, OuterPadding, y, contentWidth, LabelHeight);
+        y += LabelHeight;
+        Place(_upkPathTextBox, OuterPadding, y, fieldWidth, FieldHeight);
+        Place(_browseUpkButton, OuterPadding + fieldWidth + SideGap, y, ButtonWidth, FieldHeight);
+        y += FieldHeight + 8;
+        Place(_useCurrentUpkButton, OuterPadding + fieldWidth + SideGap, y, ButtonWidth, FieldHeight);
         y += FieldHeight + RowGap;
     }
 
