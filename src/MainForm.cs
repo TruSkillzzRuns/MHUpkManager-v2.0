@@ -92,6 +92,10 @@ namespace MHUpkManager
         private List<TreeNode> rootNodes;
         private object currentObject;
 
+        partial void InitializeLocalOnlyFeatures();
+        partial void OnUpkLoadedLocalOnly();
+        partial void ConfigureLocalOnlyUiEditor();
+
         public MainForm()
         {
             InitializeComponent();
@@ -146,6 +150,11 @@ namespace MHUpkManager
             InitializeTextureWorkspaceUi();
             InitializeSkeletalMeshRetargeterUi();
             InitializeUiEditorUi();
+            uiEditorPanel.SetTextureReplacementEnabled(
+                false,
+                "UI image replacement is temporarily disabled in the shared build while direct UPK icon replacement is being validated.");
+            ConfigureLocalOnlyUiEditor();
+            InitializeLocalOnlyFeatures();
             LogRetargetBuildMarker();
             RefreshRecentUpksMenu();
             tabControl2.SelectedIndexChanged += tabControl2_SelectedIndexChanged;
@@ -1097,6 +1106,12 @@ namespace MHUpkManager
                     "UI Editor",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
+            }
+            catch (InvalidOperationException ex)
+            {
+                progressStatus.Text = "UI image replacement failed.";
+                uiEditorPanel.AppendLog($"UI Editor image replacement failed: {ex.Message}");
+                WarningBox($"UI Editor image replacement failed.\n\n{ex.Message}");
             }
             catch (Exception ex)
             {
@@ -3231,6 +3246,7 @@ namespace MHUpkManager
 
                 ViewEntities.BuildObjectTree(rootNodes, header);
                 UpdateObjectsTree();
+                OnUpkLoadedLocalOnly();
                 ApplyTheme();
             }
             finally

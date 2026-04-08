@@ -69,6 +69,7 @@ internal sealed class UiEditorTool
     private readonly UpkTextureLoader _textureLoader = new();
     private readonly TextureLoader _diskTextureLoader = new();
     private readonly TexturePreviewInjector _textureInjector = new();
+    private readonly UiEditorDirectTextureInjector _directTextureInjector = new();
     private readonly UpkRawExportPatcher _rawExportPatcher = new();
 
     public Task<IReadOnlyList<EnemyClientUiTarget>> ScanPackageAsync(string packagePath, string subjectName)
@@ -154,17 +155,11 @@ internal sealed class UiEditorTool
         ArgumentException.ThrowIfNullOrWhiteSpace(asset.ExportPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(asset.ReplacementFilePath);
 
-        await ValidateTextureReplacementSupportAsync(packagePath, asset.ExportPath).ConfigureAwait(true);
-
         TexturePreviewTexture replacement = _diskTextureLoader.LoadFromFile(asset.ReplacementFilePath, TexturePreviewMaterialSlot.Diffuse);
-        await _textureInjector.InjectAsync(packagePath, asset.ExportPath, replacement, log).ConfigureAwait(true);
-    }
-
-    private async Task ValidateTextureReplacementSupportAsync(string packagePath, string exportPath)
-    {
         try
         {
-            await _textureInjector.ResolveTargetInfoAsync(packagePath, exportPath).ConfigureAwait(true);
+            await _textureInjector.ResolveTargetInfoAsync(packagePath, asset.ExportPath).ConfigureAwait(true);
+            await _textureInjector.InjectAsync(packagePath, asset.ExportPath, replacement, log).ConfigureAwait(true);
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("Load TextureFileCacheManifest.bin first", StringComparison.OrdinalIgnoreCase))
         {
@@ -174,9 +169,7 @@ internal sealed class UiEditorTool
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("was not found in TextureFileCacheManifest.bin", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException(
-                $"Texture '{exportPath}' is not tracked by TextureFileCacheManifest.bin. Right now the UI Editor can only inject textures that are manifest/cache-backed. This UPK-only icon asset can be previewed and exported, but direct replacement for it is not implemented yet.",
-                ex);
+            await _directTextureInjector.InjectAsync(packagePath, asset.ExportPath, replacement, log).ConfigureAwait(true);
         }
     }
 

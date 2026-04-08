@@ -33,6 +33,8 @@ internal sealed class UiEditorPanel : UserControl
     private readonly List<EnemyClientUiTarget> _targets = [];
     private readonly List<UiEditorTextureAsset> _textureAssets = [];
     private bool _suppressSelectionEvents;
+    private bool _textureReplacementEnabled;
+    private string _textureReplacementDisabledReason = string.Empty;
 
     public UiEditorPanel()
     {
@@ -253,6 +255,8 @@ internal sealed class UiEditorPanel : UserControl
     public string PackagePath => _packagePathTextBox.Text.Trim();
     public string SubjectName => _subjectTextBox.Text.Trim();
     public string SwfImportFilePath => _swfImportPathTextBox.Text.Trim();
+    public bool TextureReplacementEnabled => _textureReplacementEnabled;
+    public string TextureReplacementDisabledReason => _textureReplacementDisabledReason;
 
     public EnemyClientUiTarget SelectedTarget => _targetsGrid.SelectedRows.Count == 0
         ? null
@@ -276,8 +280,8 @@ internal sealed class UiEditorPanel : UserControl
         _scanTextureAssetsButton.Enabled = !busy;
         _previewTextureButton.Enabled = !busy;
         _exportTextureButton.Enabled = !busy;
-        _chooseReplacementButton.Enabled = !busy;
-        _applyTextureReplacementButton.Enabled = !busy;
+        _chooseReplacementButton.Enabled = !busy && _textureReplacementEnabled && SelectedTextureAsset != null;
+        _applyTextureReplacementButton.Enabled = !busy && _textureReplacementEnabled && SelectedTextureAsset != null && !string.IsNullOrWhiteSpace(SelectedTextureAsset.ReplacementFilePath);
         _previewSwfButton.Enabled = !busy;
         _exportSwfRawButton.Enabled = !busy;
         _exportSwfEmbeddedButton.Enabled = !busy;
@@ -365,6 +369,14 @@ internal sealed class UiEditorPanel : UserControl
 
         _replacementPathTextBox.Text = replacementFilePath ?? string.Empty;
         RefreshTextureRows();
+        RefreshTextureSelectionState();
+    }
+
+    public void SetTextureReplacementEnabled(bool enabled, string reason = null)
+    {
+        _textureReplacementEnabled = enabled;
+        _textureReplacementDisabledReason = enabled ? string.Empty : (reason ?? string.Empty);
+        RefreshTextureSelectionState();
     }
 
     public void SetSwfImportFile(string importFilePath)
@@ -450,6 +462,10 @@ internal sealed class UiEditorPanel : UserControl
     {
         UiEditorTextureAsset asset = SelectedTextureAsset;
         _replacementPathTextBox.Text = asset?.ReplacementFilePath ?? string.Empty;
+        _chooseReplacementButton.Enabled = _textureReplacementEnabled && asset != null;
+        _applyTextureReplacementButton.Enabled = _textureReplacementEnabled && asset != null && !string.IsNullOrWhiteSpace(asset.ReplacementFilePath);
+        if (!_textureReplacementEnabled && !string.IsNullOrWhiteSpace(_textureReplacementDisabledReason))
+            _textureSummaryLabel.Text = _textureReplacementDisabledReason;
     }
 
     private void RefreshTextureRows()

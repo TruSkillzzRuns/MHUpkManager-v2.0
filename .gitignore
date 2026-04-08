@@ -258,6 +258,9 @@ Generated_Code/
 # because we have git ;-)
 _UpgradeReport_Files/
 Backup*/
+
+# Local-only app extensions that should never go to GitHub.
+src/LocalOnly/
 !src/BackupManager/
 !src/BackupManager/**
 UpgradeLog*.XML
