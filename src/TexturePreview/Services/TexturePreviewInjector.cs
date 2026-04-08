@@ -2,6 +2,8 @@ using DDSLib;
 using DDSLib.Constants;
 using MHUpkManager.TextureManager;
 using System.Numerics;
+using UpkManager.Constants;
+using UpkManager.Models.UpkFile;
 using UpkManager.Models.UpkFile.Engine.Texture;
 using UpkManager.Models.UpkFile.Objects;
 using UpkManager.Models.UpkFile.Tables;
@@ -31,8 +33,7 @@ internal sealed class TexturePreviewInjector
         };
     }
 
-    public async Task InjectAsync(string upkPath, string exportPath, TexturePreviewTexture sourceTexture, Action<string> log = null)
-    {
+    public async Task InjectAsync(string upkPath, string exportPath, TexturePreviewTexture sourceTexture, Action<string> log = null)    {
         if (sourceTexture == null)
             throw new ArgumentNullException(nameof(sourceTexture));
 
@@ -217,6 +218,148 @@ internal sealed class TexturePreviewInjector
             throw new InvalidOperationException($"Texture '{exportPath}' does not point at a writable texture cache file.");
 
         return (texture, textureEntry);
+    }
+
+    /// <summary>
+    /// Injects a replacement texture directly into a UPK whose Texture2D mip data is stored
+    /// inline (not in a .tfc file).  Used for HUD/UI textures that have no manifest entry.
+    /// Dimensions and format must match the target; a .bak backup is created automatically.
+    /// </summary>
+    public async Task InjectInlineAsync(string upkPath, string exportPath, TexturePreviewTexture sourceTexture, Action<string> log = null)
+    {
+        if (sourceTexture == null) throw new ArgumentNullException(nameof(sourceTexture));
+
+        log?.Invoke($"Opening package: {Path.GetFileName(upkPath)}");
+        (UTexture2D texture, byte[] originalBytes, UnrealHeader header, UnrealExportTableEntry export) =
+            await LoadTextureExportAsync(upkPath, exportPath).ConfigureAwait(true);
+
+        if (sourceTexture.Width != texture.SizeX || sourceTexture.Height != texture.SizeY)
+            throw new InvalidOperationException(
+                $"Texture dimensions must match. Target is {texture.SizeX}\u00d7{texture.SizeY}, source is {sourceTexture.Width}\u00d7{sourceTexture.Height}.");
+
+        FileFormat targetFormat = UTexture2D.ParseFileFormat(texture.Format);
+        int targetMipCount = texture.Mips.Count(m => m.Data != null && m.Data.Length > 0);
+        if (targetMipCount == 0) targetMipCount = 1;
+
+        bool isNormal = IsLikelyNormalTarget(texture, exportPath);
+        log?.Invoke($"Target: format={texture.Format}, size={texture.SizeX}\u00d7{texture.SizeY}, mips={targetMipCount}.");
+
+        DdsFile dds = await Task.Run(() => BuildWritableTexture(sourceTexture, targetFormat, targetMipCount, isNormal, log)).ConfigureAwait(true);
+
+        if (dds.MipMaps.Count < targetMipCount)
+            throw new InvalidOperationException($"DDS produced {dds.MipMaps.Count} mip(s) but target requires {targetMipCount}.");
+
+        // Re-encode each mip as an LZO_ENC bulk data block in a new export buffer.
+        // Layout mirrors FTexture2DMipMap: [BulkData header 16B] [raw data] [SizeX int32] [SizeY int32]
+        // The original package stores mip data as uncompressed inline bulk data (flags=0) inside
+        // package-level LZO chunks.  We output an uncompressed package, so we also write the mip
+        // data as uncompressed inline bulk data — NOT as per-export LZO_ENC.
+        byte[] prefix = GetTextureMipPrefix(export, texture);
+        byte[] mipSuffix = GetTextureMipSuffix(export, texture);
+
+        log?.Invoke($"[Diag] exportBytes={export.UnrealObjectReader.GetBytes().Length} prefix={prefix.Length} mipArrayOffset={texture.MipArrayOffset} mipCount={targetMipCount} suffix={mipSuffix.Length}");
+
+        using MemoryStream mipStream = new();
+        List<UpkRepacker.BulkDataPatch> bulkPatches = [];
+        int mipRegionBase = prefix.Length + 4; // prefix + mipCount int32
+        for (int i = 0; i < targetMipCount; i++)
+        {
+            byte[] mipData = dds.MipMaps[i].MipMap;
+
+            // Build uncompressed inline bulk data:
+            //   uint32 BulkDataFlags = 0          (uncompressed inline)
+            //   int32  UncompressedSize            (= raw data length)
+            //   int32  CompressedSize              (= same as uncompressed)
+            //   int32  Offset                      (absolute file offset — patched by UpkRepacker)
+            //   byte[] RawData[CompressedSize]
+            //   int32  SizeX
+            //   int32  SizeY
+            int chunkStartInExport = mipRegionBase + (int)mipStream.Position;
+            // offset field is at byte 12, data starts at byte 16
+            bulkPatches.Add(new UpkRepacker.BulkDataPatch(chunkStartInExport + 12, chunkStartInExport + 16));
+
+            mipStream.Write(BitConverter.GetBytes((uint)0), 0, 4);         // BulkDataFlags = 0 (uncompressed)
+            mipStream.Write(BitConverter.GetBytes(mipData.Length), 0, 4);   // UncompressedSize
+            mipStream.Write(BitConverter.GetBytes(mipData.Length), 0, 4);   // CompressedSize (same)
+            mipStream.Write(BitConverter.GetBytes(0), 0, 4);               // Offset placeholder (patched later)
+            mipStream.Write(mipData, 0, mipData.Length);                   // Raw pixel data
+            mipStream.Write(BitConverter.GetBytes(dds.MipMaps[i].Width),  0, 4); // SizeX
+            mipStream.Write(BitConverter.GetBytes(dds.MipMaps[i].Height), 0, 4); // SizeY
+
+            log?.Invoke($"[Diag] mip[{i}] mipData={mipData.Length} bulkEntry={16 + mipData.Length + 8}");
+        }
+
+        byte[] mipCountBytes = BitConverter.GetBytes(targetMipCount);
+        byte[] newMipRegion = mipStream.ToArray();
+        log?.Invoke($"[Diag] newMipRegion={newMipRegion.Length} mipSuffix={mipSuffix.Length} newExportBuffer={prefix.Length + 4 + newMipRegion.Length + mipSuffix.Length}");
+        byte[] newExportBuffer = new byte[prefix.Length + 4 + newMipRegion.Length + mipSuffix.Length];
+        Buffer.BlockCopy(prefix,        0, newExportBuffer, 0,                                         prefix.Length);
+        Buffer.BlockCopy(mipCountBytes, 0, newExportBuffer, prefix.Length,                             4);
+        Buffer.BlockCopy(newMipRegion,  0, newExportBuffer, prefix.Length + 4,                         newMipRegion.Length);
+        Buffer.BlockCopy(mipSuffix,     0, newExportBuffer, prefix.Length + 4 + newMipRegion.Length,  mipSuffix.Length);
+
+        byte[] repacked = header.CompressedChunks.Count > 0
+            ? UpkRepacker.RepackCompressed(originalBytes, header, export.TableIndex - 1, newExportBuffer, bulkPatches)
+            : UpkRepacker.Repack(originalBytes, header, export.TableIndex - 1, newExportBuffer, bulkPatches);
+
+        EnsureBackupExists(upkPath);
+        await File.WriteAllBytesAsync(upkPath, repacked).ConfigureAwait(true);
+        log?.Invoke($"Inline texture injected into {exportPath} in {Path.GetFileName(upkPath)}.");
+    }
+
+    private static async Task<(UTexture2D Texture, byte[] OriginalBytes, UnrealHeader Header, UnrealExportTableEntry Export)>
+        LoadTextureExportAsync(string upkPath, string exportPath)
+    {
+        byte[] originalBytes = await File.ReadAllBytesAsync(upkPath).ConfigureAwait(true);
+        UpkFileRepository repository = new();
+        UnrealHeader header = await repository.LoadUpkFile(upkPath).ConfigureAwait(true);
+        await header.ReadHeaderAsync(null).ConfigureAwait(true);
+
+        UnrealExportTableEntry export = header.ExportTable
+            .FirstOrDefault(e => string.Equals(e.GetPathName(), exportPath, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException($"Could not find texture export '{exportPath}'.");
+
+        if (export.UnrealObject == null)
+            await export.ParseUnrealObject(false, false).ConfigureAwait(true);
+
+        if (export.UnrealObject is not IUnrealObject unrealObject || unrealObject.UObject is not UTexture2D texture)
+            throw new InvalidOperationException($"Export '{exportPath}' is not a Texture2D.");
+
+        return (texture, originalBytes, header, export);
+    }
+
+    // Returns the bytes of the export buffer up to (not including) the mip count int32.
+    private static byte[] GetTextureMipPrefix(UnrealExportTableEntry export, UTexture2D texture)
+    {
+        byte[] exportBytes = export.UnrealObjectReader.GetBytes();
+        // MipArrayOffset is the reader position right after the tagged properties (after the None
+        // terminator), which is where the Mips count int32 begins.
+        return exportBytes[..texture.MipArrayOffset];
+    }
+
+    // Returns the bytes after the last original mip's SizeY field, i.e. everything from the
+    // TextureFileCacheGuid onward (GUID + cached platform mip arrays + flash mip data).
+    private static byte[] GetTextureMipSuffix(UnrealExportTableEntry export, UTexture2D texture)
+    {
+        byte[] exportBytes = export.UnrealObjectReader.GetBytes();
+        int cursor = texture.MipArrayOffset + 4; // skip mip count int32
+        foreach (var mip in texture.Mips)
+        {
+            // Each FTexture2DMipMap bulk data header is: flags(4)+uncompSize(4)+compSize(4)+offset(4) = 16 bytes
+            // followed by compressed data blocks, then SizeX(4)+SizeY(4).
+            // We stored the original reader bytes so we can scan them directly.
+            using MemoryStream scanner = new(exportBytes, cursor, exportBytes.Length - cursor, writable: false);
+            using BinaryReader br = new(scanner);
+            uint flags = br.ReadUInt32();
+            int uncompSize = br.ReadInt32();
+            int compSize = br.ReadInt32();
+            int offset = br.ReadInt32(); // absolute data offset, ignore
+            // If StoreInSeparatefile or Unused: no payload follows
+            const uint nothingToDo = (uint)(BulkDataCompressionTypes.Unused | BulkDataCompressionTypes.StoreInSeparatefile);
+            int payloadSize = (flags & nothingToDo) != 0 ? 0 : compSize;
+            cursor += 16 + payloadSize + 4 + 4; // header + payload + SizeX + SizeY
+        }
+        return exportBytes[cursor..];
     }
 }
 

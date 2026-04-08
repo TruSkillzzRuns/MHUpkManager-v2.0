@@ -12,7 +12,7 @@ internal sealed class UE3LodSerializer
         return SerializeLodModel(lodModel.Inner, context);
     }
 
-    private SerializedLodModel SerializeLodModel(FStaticLODModel lod, MeshImportContext context)
+    internal SerializedLodModel SerializeLodModel(FStaticLODModel lod, MeshImportContext context)
     {
         using UE3BinaryWriter writer = new();
         List<BulkDataPatch> bulkDataPatches = [];

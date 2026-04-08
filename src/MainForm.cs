@@ -18,7 +18,6 @@ using System.Media;
 using System.Numerics;
 using System.Reflection;
 using System.Security.Cryptography;
-using UpkManager.Contracts;
 using UpkManager.Extensions;
 using UpkManager.Indexing;
 using UpkManager.Models;
@@ -688,11 +687,6 @@ namespace MHUpkManager
             bool isObjectsWorkspace =
                 string.Equals(activeTabName, "objectsPage", StringComparison.Ordinal) ||
                 string.Equals(activeTabName, "propertyFilePage", StringComparison.Ordinal);
-            bool isToolWorkspace =
-                string.Equals(activeTabName, "meshWorkspacePage", StringComparison.Ordinal) ||
-                string.Equals(activeTabName, "backupManagerPage", StringComparison.Ordinal) ||
-                string.Equals(activeTabName, "textureWorkspacePage", StringComparison.Ordinal) ||
-                string.Equals(activeTabName, "retargetWorkspacePage", StringComparison.Ordinal);
 
             if (!isObjectsWorkspace)
             {

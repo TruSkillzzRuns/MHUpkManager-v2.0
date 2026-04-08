@@ -20,7 +20,7 @@ namespace UpkManager.Models.UpkFile.Core
         public override void ReadPropertyValue(UBuffer buffer, int size, UnrealProperty property)
         {
             Enum = buffer.ReadName();
-            if (Enum?.Name == "none")
+            if (Enum?.IsNone() == true)
                 Value = buffer.Reader.ReadByte();
             else
                 EnumValueName = buffer.ReadName();

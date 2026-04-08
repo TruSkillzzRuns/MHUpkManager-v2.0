@@ -67,6 +67,7 @@ namespace UpkManager.Models.UpkFile.Engine.Texture
         {
             base.ReadBuffer(buffer);
 
+            MipArrayOffset = buffer.Reader.CurrentOffset;
             Mips = buffer.ReadArray(FTexture2DMipMap.ReadMipMap);
 
             SetMipsFormat();
@@ -163,6 +164,7 @@ namespace UpkManager.Models.UpkFile.Engine.Texture
         }
 
         public int MipMapsCount { get; private set; }
+        public int MipArrayOffset { get; private set; }
         protected List<UnrealCompressedChunkBulkData> CompressedChunks { get; } = [];
 
         public void ResetMipMaps(int count)

@@ -194,16 +194,28 @@ namespace UpkIndexGenerator
             if (exportPaths.Count == 0)
                 return;
 
-            var relevantPaths = await context.PackageImports
+            // All exports are candidates. For non-SwfMovie classes we additionally
+            // require that the export appeared as an import in at least one other package
+            // (cross-reference filter), so the index stays small. SwfMovie exports are
+            // always included because their GFx dependency URLs are not visible in UPK
+            // import tables — they are embedded inside the binary SWF blob.
+            var crossReferencedPaths = await context.PackageImports
                 .Where(p => exportPaths.Contains(p.FullObjectPath))
                 .Select(p => p.FullObjectPath)
                 .Distinct()
                 .ToListAsync(ct);
 
-            if (relevantPaths.Count == 0)
-                return;
+            var swfMoviePaths = header.ExportTable
+                .Where(e => string.Equals(e?.ClassReferenceNameIndex?.Name, "SwfMovie", StringComparison.OrdinalIgnoreCase))
+                .Select(e => e.GetPathName().ToLowerInvariant())
+                .Where(p => !string.IsNullOrEmpty(p))
+                .Distinct()
+                .ToList();
 
-            var relevantSet = relevantPaths.ToHashSet();
+            var relevantSet = crossReferencedPaths.Union(swfMoviePaths).ToHashSet();
+
+            if (relevantSet.Count == 0)
+                return;
 
             foreach (var entry in header.ExportTable)
             {

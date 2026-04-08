@@ -22,7 +22,7 @@ internal sealed class TexturePreviewUI : UserControl
     private readonly Button _loadSelectedButton;
     private readonly ComboBox _textureTypeComboBox;
     private readonly CheckBox _applyToMeshPreviewCheckBox;
-    private readonly CheckBox _autoInjectIntoUpkCheckBox;
+    private readonly CheckBox _inlineTextureCheckBox;
     private readonly Button _injectTextureButton;
     private readonly Button _exportTextureButton;
     private readonly ComboBox _mipComboBox;
@@ -65,7 +65,7 @@ internal sealed class TexturePreviewUI : UserControl
         _textureTypeComboBox.Items.AddRange(Enum.GetNames(typeof(TexturePreviewMaterialSlot)));
         _textureTypeComboBox.SelectedItem = nameof(TexturePreviewMaterialSlot.Diffuse);
         _applyToMeshPreviewCheckBox = CreateCheckBox("Apply To Preview Mesh");
-        _autoInjectIntoUpkCheckBox = CreateCheckBox("Auto Inject UPK");
+        _inlineTextureCheckBox = CreateCheckBox("Not in manifest (inline UPK)");
         _injectTextureButton = CreateButton("Inject Texture");
         _exportTextureButton = CreateButton("Export Texture");
         _mipComboBox = CreateComboBox();
@@ -118,6 +118,7 @@ internal sealed class TexturePreviewUI : UserControl
         _toolTip.SetToolTip(_loadFileButton, "Select a texture from disk (PNG, DDS, TGA, JPG).");
         _toolTip.SetToolTip(_loadUpkButton, "Select one or more Texture2D exports from the current UPK, or browse for a UPK if none is open.");
         _toolTip.SetToolTip(_loadSelectedButton, "Load the currently selected Texture2D export from the object tree.");
+        _toolTip.SetToolTip(_inlineTextureCheckBox, "Check this if the target texture is stored inline in the UPK (e.g. HUD textures) rather than in a .tfc file. Bypasses the texture manifest.");
 
         AddRow(WorkspaceUiStyle.CreateWorkflowSectionHeader(1, "Source"));
         AddRow(_loadFileButton);
@@ -127,7 +128,7 @@ internal sealed class TexturePreviewUI : UserControl
         AddRow(CreateLabel("Texture Type:"));
         AddRow(_textureTypeComboBox);
         AddRow(_applyToMeshPreviewCheckBox);
-        AddRow(_autoInjectIntoUpkCheckBox);
+        AddRow(_inlineTextureCheckBox);
         AddRow(_injectTextureButton);
         AddRow(_exportTextureButton);
         AddRow(WorkspaceUiStyle.CreateWorkflowSectionHeader(3, "Details"));
@@ -436,6 +437,8 @@ internal sealed class TexturePreviewUI : UserControl
         if (dialog.ShowDialog() != DialogResult.OK)
             return;
 
+        bool inlineMode = _inlineTextureCheckBox.Checked;
+
         string logFilePath = BeginTextureInjectionLog();
         Action<string> compositeLog = message =>
         {
@@ -446,6 +449,10 @@ internal sealed class TexturePreviewUI : UserControl
         try
         {
             SetInjectionBusy(true);
+            compositeLog(inlineMode
+                ? "Inline mode: bypassing texture manifest."
+                : "Manifest mode: using texture cache (.tfc) pipeline.");
+
             compositeLog("Enumerating texture exports from selected UPK.");
             List<string> exports = await _upkTextureLoader.GetTextureExportsAsync(dialog.FileName).ConfigureAwait(true);
             if (exports.Count == 0)
@@ -460,7 +467,11 @@ internal sealed class TexturePreviewUI : UserControl
                 return;
 
             compositeLog($"Starting texture injection into {exportPath}.");
-            await _injector.InjectAsync(dialog.FileName, exportPath, _currentTexture, compositeLog).ConfigureAwait(true);
+
+            if (inlineMode)
+                await _injector.InjectInlineAsync(dialog.FileName, exportPath, _currentTexture, compositeLog).ConfigureAwait(true);
+            else
+                await _injector.InjectAsync(dialog.FileName, exportPath, _currentTexture, compositeLog).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -871,6 +882,7 @@ internal sealed class TexturePreviewUI : UserControl
     {
         _injectTextureBusy = busy;
         _injectTextureButton.Enabled = !busy;
+        _inlineTextureCheckBox.Enabled = !busy;
         _loadFileButton.Enabled = !busy;
         _loadUpkButton.Enabled = !busy;
         UseWaitCursor = busy;
