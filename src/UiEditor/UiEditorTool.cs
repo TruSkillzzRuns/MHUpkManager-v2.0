@@ -154,8 +154,30 @@ internal sealed class UiEditorTool
         ArgumentException.ThrowIfNullOrWhiteSpace(asset.ExportPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(asset.ReplacementFilePath);
 
+        await ValidateTextureReplacementSupportAsync(packagePath, asset.ExportPath).ConfigureAwait(true);
+
         TexturePreviewTexture replacement = _diskTextureLoader.LoadFromFile(asset.ReplacementFilePath, TexturePreviewMaterialSlot.Diffuse);
         await _textureInjector.InjectAsync(packagePath, asset.ExportPath, replacement, log).ConfigureAwait(true);
+    }
+
+    private async Task ValidateTextureReplacementSupportAsync(string packagePath, string exportPath)
+    {
+        try
+        {
+            await _textureInjector.ResolveTargetInfoAsync(packagePath, exportPath).ConfigureAwait(true);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("Load TextureFileCacheManifest.bin first", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "UI image replacement needs TextureFileCacheManifest.bin to be loaded first. Load the texture manifest in the app, then try the replacement again.",
+                ex);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("was not found in TextureFileCacheManifest.bin", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Texture '{exportPath}' is not tracked by TextureFileCacheManifest.bin. Right now the UI Editor can only inject textures that are manifest/cache-backed. This UPK-only icon asset can be previewed and exported, but direct replacement for it is not implemented yet.",
+                ex);
+        }
     }
 
     public async Task<UiEditorSwfPreview> PreviewSwfMovieAsync(string packagePath, EnemyClientUiTarget target)
