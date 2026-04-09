@@ -93,6 +93,7 @@ internal sealed class FbxMeshImporter
         string materialName = mesh.MaterialIndex >= 0 && mesh.MaterialIndex < scene.MaterialCount
             ? scene.Materials[mesh.MaterialIndex].Name ?? $"Material_{mesh.MaterialIndex}"
             : $"Material_{mesh.MaterialIndex}";
+        bool needsAdditionalWindingFlip = meshTransform.GetDeterminant() < 0.0f;
 
         NeutralSection section = new()
         {
@@ -144,8 +145,16 @@ internal sealed class FbxMeshImporter
                 throw new InvalidOperationException("The FBX contains a non-triangulated face after triangulation.");
 
             section.Indices.Add(face.Indices[0]);
-            section.Indices.Add(face.Indices[1]);
-            section.Indices.Add(face.Indices[2]);
+            if (needsAdditionalWindingFlip)
+            {
+                section.Indices.Add(face.Indices[2]);
+                section.Indices.Add(face.Indices[1]);
+            }
+            else
+            {
+                section.Indices.Add(face.Indices[1]);
+                section.Indices.Add(face.Indices[2]);
+            }
         }
 
         section.ImportedVertexCount = section.Vertices.Count;
@@ -158,6 +167,7 @@ internal sealed class FbxMeshImporter
         PopulatePositionSplitDiagnostics(section);
         WeldExactDuplicateVertices(section);
         section.ImportedExactWeldVertexCount = section.Vertices.Count;
+        RegenerateSurfaceVectorsForUe3Winding(section);
         if (EnableSurfaceVectorMerge)
             MergeVerticesIgnoringSurfaceVectors(section);
         section.ImportedMergedVertexCount = section.Vertices.Count;
@@ -227,6 +237,24 @@ internal sealed class FbxMeshImporter
             section.Indices[i] = indexMap[section.Indices[i]];
 
         List<NeutralVertex> regeneratedVertices = RegenerateSurfaceVectors(mergedVertices, section.Indices);
+        section.Vertices.Clear();
+        section.Vertices.AddRange(regeneratedVertices);
+    }
+
+    private static void RegenerateSurfaceVectorsForUe3Winding(NeutralSection section)
+    {
+        if (section.Vertices.Count == 0 || section.Indices.Count == 0)
+            return;
+
+        List<int> ue3WoundIndices = new(section.Indices.Count);
+        for (int i = 0; i + 2 < section.Indices.Count; i += 3)
+        {
+            ue3WoundIndices.Add(section.Indices[i]);
+            ue3WoundIndices.Add(section.Indices[i + 2]);
+            ue3WoundIndices.Add(section.Indices[i + 1]);
+        }
+
+        List<NeutralVertex> regeneratedVertices = RegenerateSurfaceVectors(section.Vertices, ue3WoundIndices);
         section.Vertices.Clear();
         section.Vertices.AddRange(regeneratedVertices);
     }

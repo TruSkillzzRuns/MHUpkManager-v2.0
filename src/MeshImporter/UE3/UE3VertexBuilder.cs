@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Linq;
 using UpkManager.Models.UpkFile.Core;
 using UpkManager.Models.UpkFile.Engine.Mesh;
 
@@ -11,15 +12,16 @@ internal sealed class UE3VertexBuilder
         IReadOnlyList<IReadOnlyList<NormalizedWeight>> normalizedWeights,
         MeshImportContext context,
         IReadOnlyList<int> boneMap,
-        IReadOnlyList<int> sourceVertexIndices)
+        IReadOnlyList<int> sourceVertexIndices,
+        bool rebuildAsRigidChunk,
+        bool preserveRigidVertices)
     {
         Dictionary<int, byte> localBoneLookup = boneMap
             .Select((boneIndex, localIndex) => new { boneIndex, localIndex })
             .ToDictionary(static x => x.boneIndex, static x => (byte)x.localIndex);
 
-        List<FSoftSkinVertex> softVertices = new(section.Vertices.Count);
-        List<FGPUSkinVertexBase> gpuVertices = new(section.Vertices.Count);
-        List<FVertexInfluence> influences = new(section.Vertices.Count);
+        List<(NeutralVertex Vertex, byte[] Bones, byte[] Weights, FPackedNormal TangentX, FPackedNormal TangentY, FPackedNormal TangentZ, bool IsRigid)> preparedVertices = new(section.Vertices.Count);
+        int[] localIndexRemap = new int[section.Vertices.Count];
 
         for (int i = 0; i < section.Vertices.Count; i++)
         {
@@ -30,6 +32,57 @@ internal sealed class UE3VertexBuilder
             FPackedNormal tangentX = PackNormal(vertex.Tangent, 1.0f);
             FPackedNormal tangentY = PackNormal(Vector3.Normalize(vertex.Bitangent), 1.0f);
             FPackedNormal tangentZ = PackNormal(vertex.Normal, ComputeDeterminantSign(vertex.Normal, vertex.Tangent, vertex.Bitangent));
+
+            bool isRigid = rebuildAsRigidChunk || (preserveRigidVertices && IsSingleInfluenceVertex(influenceWeights));
+            preparedVertices.Add((vertex, localBones, influenceWeights, tangentX, tangentY, tangentZ, isRigid));
+        }
+
+        List<FRigidSkinVertex> rigidVertices = new(section.Vertices.Count);
+        List<FSoftSkinVertex> softVertices = new(section.Vertices.Count);
+        List<FGPUSkinVertexBase> gpuVertices = new(section.Vertices.Count);
+        List<FVertexInfluence> influences = new(section.Vertices.Count);
+
+        int outputIndex = 0;
+        foreach (int i in Enumerable.Range(0, preparedVertices.Count).Where(index => preparedVertices[index].IsRigid))
+        {
+            localIndexRemap[i] = outputIndex++;
+            var prepared = preparedVertices[i];
+            NeutralVertex vertex = prepared.Vertex;
+            byte[] localBones = prepared.Bones;
+            byte[] influenceWeights = prepared.Weights;
+            FPackedNormal tangentX = prepared.TangentX;
+            FPackedNormal tangentY = prepared.TangentY;
+            FPackedNormal tangentZ = prepared.TangentZ;
+
+            rigidVertices.Add(new FRigidSkinVertex
+            {
+                Position = new FVector(vertex.Position.X, vertex.Position.Y, vertex.Position.Z),
+                TangentX = tangentX,
+                TangentY = tangentY,
+                TangentZ = tangentZ,
+                UVs = BuildSoftUvs(vertex.UVs),
+                Color = new FColor { R = 255, G = 255, B = 255, A = 255 },
+                Bone = localBones[0]
+            });
+
+            gpuVertices.Add(BuildGpuVertex(context, vertex, tangentX, tangentZ, localBones, influenceWeights));
+            influences.Add(new FVertexInfluence
+            {
+                Bones = new FInfluenceBones { Bones = [.. localBones] },
+                Weights = new FInfluenceWeights { Weights = [.. influenceWeights] }
+            });
+        }
+
+        foreach (int i in Enumerable.Range(0, preparedVertices.Count).Where(index => preparedVertices[index].IsRigid == false))
+        {
+            localIndexRemap[i] = outputIndex++;
+            var prepared = preparedVertices[i];
+            NeutralVertex vertex = prepared.Vertex;
+            byte[] localBones = prepared.Bones;
+            byte[] influenceWeights = prepared.Weights;
+            FPackedNormal tangentX = prepared.TangentX;
+            FPackedNormal tangentY = prepared.TangentY;
+            FPackedNormal tangentZ = prepared.TangentZ;
 
             softVertices.Add(new FSoftSkinVertex
             {
@@ -51,7 +104,7 @@ internal sealed class UE3VertexBuilder
             });
         }
 
-        return new BuiltVertexData(softVertices, gpuVertices, influences);
+        return new BuiltVertexData(rigidVertices, softVertices, gpuVertices, influences, localIndexRemap);
     }
 
     private static (byte[] Bones, byte[] Weights) BuildBones(
@@ -166,9 +219,18 @@ internal sealed class UE3VertexBuilder
         Vector3 computed = Vector3.Cross(Vector3.Normalize(normal), Vector3.Normalize(tangent));
         return Vector3.Dot(computed, Vector3.Normalize(bitangent)) < 0.0f ? -1.0f : 1.0f;
     }
+
+    private static bool IsSingleInfluenceVertex(IReadOnlyList<byte> influenceWeights)
+    {
+        return influenceWeights.Count > 0 &&
+            influenceWeights[0] == 255 &&
+            influenceWeights.Skip(1).All(static weight => weight == 0);
+    }
 }
 
 internal sealed record BuiltVertexData(
+    List<FRigidSkinVertex> RigidVertices,
     List<FSoftSkinVertex> SoftVertices,
     List<FGPUSkinVertexBase> GpuVertices,
-    List<FVertexInfluence> Influences);
+    List<FVertexInfluence> Influences,
+    IReadOnlyList<int> LocalIndexRemap);

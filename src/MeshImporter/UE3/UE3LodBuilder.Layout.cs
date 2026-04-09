@@ -14,17 +14,28 @@ internal sealed partial class UE3LodBuilder
             ?? throw new InvalidOperationException("Imported section data was missing.");
 
         IReadOnlyList<int> chunkBoneMap = BuildBoneMap(input, normalizedWeights, context);
-        BuiltVertexData builtVertices = _vertexBuilder.Build(importedSection, normalizedWeights, context, chunkBoneMap, input.SourceVertexIndices);
-        ushort[] builtIndices = _indexBuilder.Build(importedSection, globalVertexStart);
+        FSkelMeshSection originalSection = context.OriginalLod.Sections[input.OriginalSectionIndex];
+        FSkelMeshChunk originalChunk = context.OriginalLod.Chunks[originalSection.ChunkIndex];
+        bool rebuildAsRigidChunk = originalChunk.NumSoftVertices == 0 && chunkBoneMap.Count == 1;
+        bool preserveRigidVertices = originalChunk.NumRigidVertices > 0;
+        BuiltVertexData builtVertices = _vertexBuilder.Build(
+            importedSection,
+            normalizedWeights,
+            context,
+            chunkBoneMap,
+            input.SourceVertexIndices,
+            rebuildAsRigidChunk,
+            preserveRigidVertices);
+        ushort[] builtIndices = _indexBuilder.Build(importedSection, globalVertexStart, builtVertices.LocalIndexRemap);
 
         return new BuiltSectionData(
             new FSkelMeshChunk
             {
                 BaseVertexIndex = (uint)globalVertexStart,
-                RigidVertices = [],
+                RigidVertices = [.. builtVertices.RigidVertices],
                 SoftVertices = [.. builtVertices.SoftVertices],
                 BoneMap = [.. chunkBoneMap.Select(static x => (ushort)x)],
-                NumRigidVertices = 0,
+                NumRigidVertices = builtVertices.RigidVertices.Count,
                 NumSoftVertices = builtVertices.SoftVertices.Count,
                 MaxBoneInfluences = 4
             },
@@ -92,6 +103,12 @@ internal sealed partial class UE3LodBuilder
             }
         }
 
+        FSkelMeshSection originalSection = context.OriginalLod.Sections[input.OriginalSectionIndex];
+        FSkelMeshChunk originalChunk = context.OriginalLod.Chunks[originalSection.ChunkIndex];
+        IReadOnlyList<int> originalBoneMap = [.. originalChunk.BoneMap.Select(static bone => (int)bone)];
+        if (usedBones.All(originalBoneMap.Contains))
+            return originalBoneMap;
+
         IReadOnlyList<int> ordered = context.SortBonesByRequiredOrder(usedBones);
         if (ordered.Count > byte.MaxValue)
             throw new InvalidOperationException("A UE3 chunk cannot reference more than 255 bones.");
@@ -104,6 +121,13 @@ internal sealed partial class UE3LodBuilder
         MeshImportContext context,
         IReadOnlyList<IReadOnlyList<NormalizedWeight>> normalizedWeights)
     {
+        if (ShouldPreferTriangleOrderSplit(mesh, context))
+        {
+            NeutralSection combined = CombineImportedSections(mesh);
+            mesh.LayoutStrategy = "EqualCountTriangleOrder";
+            return SplitSingleSectionByTriangleOrder(mesh, combined, context);
+        }
+
         List<SectionBuildInput> direct = TryUseSectionsDirect(mesh, context);
         if (direct.Count > 0)
         {
@@ -134,6 +158,63 @@ internal sealed partial class UE3LodBuilder
         throw new InvalidOperationException($"FBX section count ({mesh.Sections.Count}) does not match original LOD section count ({context.OriginalLod.Sections.Count}).");
     }
 
+    private static bool ShouldPreferTriangleOrderSplit(NeutralMesh mesh, MeshImportContext context)
+    {
+        if (mesh.Sections.Count <= 1 || mesh.Sections.Count != context.OriginalLod.Sections.Count)
+            return false;
+
+        bool sectionTriangleCountsAlreadyAlign = true;
+        for (int i = 0; i < mesh.Sections.Count; i++)
+        {
+            int importedTriangles = mesh.Sections[i].Indices.Count / 3;
+            int originalTriangles = checked((int)context.OriginalLod.Sections[i].NumTriangles);
+            if (importedTriangles != originalTriangles)
+            {
+                sectionTriangleCountsAlreadyAlign = false;
+                break;
+            }
+        }
+
+        // If the FBX is already arriving with the same section split as the original LOD,
+        // keep that direct split instead of recombining and redistributing triangles.
+        if (sectionTriangleCountsAlreadyAlign)
+            return false;
+
+        HashSet<int> originalMaterialIndices = [.. context.OriginalLod.Sections.Select(static section => section.MaterialIndex)];
+        if (originalMaterialIndices.Count != 1)
+            return false;
+
+        HashSet<string> importedMaterialNames = [.. mesh.Sections
+            .Select(static section => section.MaterialName ?? string.Empty)
+            .Where(static name => string.IsNullOrWhiteSpace(name) == false)];
+
+        return importedMaterialNames.Count <= 1;
+    }
+
+    private static NeutralSection CombineImportedSections(NeutralMesh mesh)
+    {
+        NeutralSection combined = new()
+        {
+            Name = mesh.Sections.Count > 0 ? mesh.Sections[0].Name : "CombinedSection",
+            MaterialName = mesh.Sections.Count > 0 ? mesh.Sections[0].MaterialName : string.Empty,
+            ImportedMaterialIndex = mesh.Sections.Count > 0 ? mesh.Sections[0].ImportedMaterialIndex : 0
+        };
+
+        foreach (NeutralSection sourceSection in mesh.Sections)
+        {
+            int vertexBase = combined.Vertices.Count;
+            combined.ImportedVertexCount += sourceSection.Vertices.Count;
+            combined.ImportedTriangleCount += sourceSection.Indices.Count / 3;
+
+            foreach (NeutralVertex vertex in sourceSection.Vertices)
+                combined.Vertices.Add(vertex);
+
+            combined.Indices.AddRange(sourceSection.Indices.Select(index => index + vertexBase));
+        }
+
+        return combined;
+    }
+
     private static void CaptureLayoutDiagnostics(
         NeutralMesh mesh,
         MeshImportContext context,
@@ -160,31 +241,48 @@ internal sealed partial class UE3LodBuilder
         if (mesh.Sections.Count != context.OriginalLod.Sections.Count)
             return [];
 
-        List<SectionBuildInput> inputs = [];
+        int[] importedVertexOffsets = new int[mesh.Sections.Count];
         int flatVertexOffset = 0;
-        for (int i = 0; i < context.OriginalLod.Sections.Count; i++)
+        for (int i = 0; i < mesh.Sections.Count; i++)
         {
-            FSkelMeshSection originalSection = context.OriginalLod.Sections[i];
-            NeutralSection importedSection = mesh.Sections[i];
+            importedVertexOffsets[i] = flatVertexOffset;
+            flatVertexOffset += mesh.Sections[i].Vertices.Count;
+        }
+
+        SectionBuildInput[] matched = new SectionBuildInput[context.OriginalLod.Sections.Count];
+        HashSet<int> usedOriginalSections = [];
+
+        for (int importedIndex = 0; importedIndex < mesh.Sections.Count; importedIndex++)
+        {
+            NeutralSection importedSection = mesh.Sections[importedIndex];
             int importedTriangles = importedSection.Indices.Count / 3;
 
             if (importedSection.Indices.Count % 3 != 0)
-                throw new InvalidOperationException($"Imported section {i} does not contain complete triangles.");
+                throw new InvalidOperationException($"Imported section {importedIndex} does not contain complete triangles.");
 
+            int originalSectionIndex = FindBestOriginalSection(importedSection, importedIndex, usedOriginalSections, context);
+            if (originalSectionIndex < 0)
+                return [];
+
+            FSkelMeshSection originalSection = context.OriginalLod.Sections[originalSectionIndex];
             if (!mesh.AllowTopologyChange && importedTriangles != originalSection.NumTriangles)
-                throw new InvalidOperationException($"Imported section {i} triangle count ({importedTriangles}) does not match original section triangle count ({originalSection.NumTriangles}).");
+                throw new InvalidOperationException(
+                    $"Imported section {importedIndex} triangle count ({importedTriangles}) does not match original section triangle count ({originalSection.NumTriangles}).");
 
-            inputs.Add(new SectionBuildInput(
-                i,
+            usedOriginalSections.Add(originalSectionIndex);
+            matched[originalSectionIndex] = new SectionBuildInput(
+                originalSectionIndex,
                 importedSection,
-                [.. Enumerable.Range(flatVertexOffset, importedSection.Vertices.Count)],
+                [.. Enumerable.Range(importedVertexOffsets[importedIndex], importedSection.Vertices.Count)],
                 false,
-                [i],
-                "Direct"));
-            flatVertexOffset += importedSection.Vertices.Count;
+                [importedIndex],
+                "DirectMatched");
         }
 
-        return inputs;
+        if (matched.Any(static input => input is null))
+            return [];
+
+        return [.. matched];
     }
 
     private static List<SectionBuildInput> TryMatchSectionsWithPreservation(NeutralMesh mesh, MeshImportContext context)

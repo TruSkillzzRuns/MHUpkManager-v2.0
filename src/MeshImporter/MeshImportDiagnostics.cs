@@ -57,6 +57,10 @@ internal static class MeshImportDiagnostics
         sb.AppendLine($"Original Chunks: {originalLod.Chunks.Count}");
         sb.AppendLine($"Rebuilt Chunks: {rebuiltLod.Chunks.Count}");
         sb.AppendLine();
+        AppendOriginalSectionSummary(sb, originalLod);
+        sb.AppendLine();
+        AppendChunkBoneMapSummary(sb, originalLod, rebuiltLod);
+        sb.AppendLine();
         sb.AppendLine($"Original VB NumTexCoords: {originalBuffer.NumTexCoords}");
         sb.AppendLine($"Rebuilt VB NumTexCoords: {rebuiltBuffer.NumTexCoords}");
         sb.AppendLine($"Original VB UseFullPrecisionUVs: {originalBuffer.bUseFullPrecisionUVs}");
@@ -194,6 +198,35 @@ internal static class MeshImportDiagnostics
         {
             LayoutSectionDiagnostic section = neutralMesh.LayoutSections[i];
             sb.AppendLine($"Layout Section {i}: OriginalSection={section.OriginalSectionIndex}, PreserveOriginal={section.PreserveOriginal}, ImportedVertices={section.ImportedVertexCount}, ImportedTriangles={section.ImportedTriangleCount}");
+        }
+    }
+
+    private static void AppendOriginalSectionSummary(StringBuilder sb, FStaticLODModel originalLod)
+    {
+        sb.AppendLine("Original Section Layout");
+        for (int i = 0; i < originalLod.Sections.Count; i++)
+        {
+            FSkelMeshSection section = originalLod.Sections[i];
+            sb.AppendLine(
+                $"Original Section {i}: MaterialIndex={section.MaterialIndex}, ChunkIndex={section.ChunkIndex}, " +
+                $"Triangles={section.NumTriangles}, BaseIndex={section.BaseIndex}");
+        }
+    }
+
+    private static void AppendChunkBoneMapSummary(StringBuilder sb, FStaticLODModel originalLod, FStaticLODModel rebuiltLod)
+    {
+        sb.AppendLine("Chunk Bone Maps");
+        int chunkCount = Math.Max(originalLod.Chunks.Count, rebuiltLod.Chunks.Count);
+        for (int i = 0; i < chunkCount; i++)
+        {
+            string originalBones = i < originalLod.Chunks.Count
+                ? string.Join(",", originalLod.Chunks[i].BoneMap.Select(static bone => bone.ToString()))
+                : "<missing>";
+            string rebuiltBones = i < rebuiltLod.Chunks.Count
+                ? string.Join(",", rebuiltLod.Chunks[i].BoneMap.Select(static bone => bone.ToString()))
+                : "<missing>";
+
+            sb.AppendLine($"Chunk {i}: Original=[{originalBones}] Rebuilt=[{rebuiltBones}]");
         }
     }
 

@@ -88,6 +88,7 @@ internal sealed class UE3ToPreviewMeshConverter
             });
         }
 
+        RebuildSurfaceBasis(previewMesh);
         previewMesh.Bones.AddRange(BuildBones(skeletalMesh.RefSkeleton));
         BuildBounds(previewMesh);
         BuildUvSeams(previewMesh);
@@ -147,6 +148,72 @@ internal sealed class UE3ToPreviewMeshConverter
     private static Vector3 NormalizeOrFallback(Vector3 value)
     {
         return value.LengthSquared() > 1e-6f ? Vector3.Normalize(value) : Vector3.UnitY;
+    }
+
+    private static void RebuildSurfaceBasis(MeshPreviewMesh mesh)
+    {
+        if (mesh.Vertices.Count == 0 || mesh.Indices.Count == 0)
+            return;
+
+        Vector3[] normalSums = new Vector3[mesh.Vertices.Count];
+        Vector3[] tangentSums = new Vector3[mesh.Vertices.Count];
+
+        for (int i = 0; i + 2 < mesh.Indices.Count; i += 3)
+        {
+            int i0 = (int)mesh.Indices[i];
+            int i1 = (int)mesh.Indices[i + 1];
+            int i2 = (int)mesh.Indices[i + 2];
+            if ((uint)i0 >= mesh.Vertices.Count || (uint)i1 >= mesh.Vertices.Count || (uint)i2 >= mesh.Vertices.Count)
+                continue;
+
+            MeshPreviewVertex v0 = mesh.Vertices[i0];
+            MeshPreviewVertex v1 = mesh.Vertices[i1];
+            MeshPreviewVertex v2 = mesh.Vertices[i2];
+
+            Vector3 edge1 = v1.Position - v0.Position;
+            Vector3 edge2 = v2.Position - v0.Position;
+            Vector3 faceNormal = Vector3.Cross(edge1, edge2);
+            if (faceNormal.LengthSquared() > 1e-10f)
+            {
+                normalSums[i0] += faceNormal;
+                normalSums[i1] += faceNormal;
+                normalSums[i2] += faceNormal;
+            }
+
+            Vector2 uv0 = v0.Uv;
+            Vector2 uv1 = v1.Uv;
+            Vector2 uv2 = v2.Uv;
+            float determinant = ((uv1.X - uv0.X) * (uv2.Y - uv0.Y)) - ((uv1.Y - uv0.Y) * (uv2.X - uv0.X));
+            if (MathF.Abs(determinant) <= 1e-10f)
+                continue;
+
+            float inverseDeterminant = 1.0f / determinant;
+            Vector3 tangent = ((edge1 * (uv2.Y - uv0.Y)) - (edge2 * (uv1.Y - uv0.Y))) * inverseDeterminant;
+            tangentSums[i0] += tangent;
+            tangentSums[i1] += tangent;
+            tangentSums[i2] += tangent;
+        }
+
+        for (int i = 0; i < mesh.Vertices.Count; i++)
+        {
+            MeshPreviewVertex vertex = mesh.Vertices[i];
+            Vector3 normal = NormalizeOrFallback(normalSums[i]);
+            Vector3 tangent = tangentSums[i].LengthSquared() > 1e-10f
+                ? Vector3.Normalize(tangentSums[i])
+                : BuildFallbackTangent(normal);
+            Vector3 bitangent = NormalizeOrFallback(Vector3.Cross(normal, tangent));
+
+            vertex.Normal = normal;
+            vertex.Tangent = tangent;
+            vertex.Bitangent = bitangent;
+            mesh.Vertices[i] = vertex;
+        }
+    }
+
+    private static Vector3 BuildFallbackTangent(Vector3 normal)
+    {
+        Vector3 axis = Math.Abs(Vector3.Dot(normal, Vector3.UnitX)) > 0.9f ? Vector3.UnitY : Vector3.UnitX;
+        return NormalizeOrFallback(Vector3.Cross(axis, normal));
     }
 
     private static void BuildBounds(MeshPreviewMesh mesh)
