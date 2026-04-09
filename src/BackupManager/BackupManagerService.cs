@@ -9,7 +9,7 @@ internal sealed class BackupManagerService
 
         SearchOption searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
         return Directory
-            .EnumerateFiles(rootFolder, "*.bak", searchOption)
+            .EnumerateFiles(rootFolder, "*.bak*", searchOption)
             .Select(CreateEntry)
             .OrderByDescending(static entry => entry.LastWriteTimeUtc)
             .ThenBy(static entry => entry.FileName, StringComparer.OrdinalIgnoreCase)
@@ -34,9 +34,7 @@ internal sealed class BackupManagerService
     private static BackupEntry CreateEntry(string backupPath)
     {
         FileInfo backupInfo = new(backupPath);
-        string originalPath = backupPath.EndsWith(".bak", StringComparison.OrdinalIgnoreCase)
-            ? backupPath[..^4]
-            : backupPath;
+        string originalPath = BackupFileHelper.ResolveOriginalPath(backupPath);
         FileInfo originalInfo = new(originalPath);
 
         return new BackupEntry

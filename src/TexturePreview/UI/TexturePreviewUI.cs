@@ -749,6 +749,7 @@ internal sealed class TexturePreviewUI : UserControl
         private readonly Button _okButton;
         private readonly Button _cancelButton;
         private readonly Panel _buttonPanel;
+        private readonly Panel _headerPanel;
 
         public TextureSelectionForm(IEnumerable<string> exports)
         {
@@ -773,14 +774,16 @@ internal sealed class TexturePreviewUI : UserControl
             {
                 Dock = DockStyle.Top,
                 AutoSize = false,
-                Height = 20,
+                Height = 24,
+                Padding = new Padding(0, 2, 0, 0),
                 TextAlign = ContentAlignment.MiddleLeft
             };
 
             _listBox = new ListBox
             {
                 Dock = DockStyle.Fill,
-                SelectionMode = SelectionMode.MultiExtended
+                SelectionMode = SelectionMode.MultiExtended,
+                IntegralHeight = false
             };
             _listBox.DoubleClick += (_, _) => ConfirmSelection();
 
@@ -790,6 +793,7 @@ internal sealed class TexturePreviewUI : UserControl
                 DialogResult = DialogResult.OK,
                 Width = 90,
                 Height = 32,
+                Margin = new Padding(8, 0, 0, 0),
                 Anchor = AnchorStyles.Right | AnchorStyles.Bottom
             };
             _okButton.Click += (_, _) => ConfirmSelection();
@@ -800,16 +804,18 @@ internal sealed class TexturePreviewUI : UserControl
                 DialogResult = DialogResult.Cancel,
                 Width = 90,
                 Height = 32,
+                Margin = new Padding(8, 0, 0, 0),
                 Anchor = AnchorStyles.Right | AnchorStyles.Bottom
             };
 
             FlowLayoutPanel buttonFlow = new()
             {
-                Dock = DockStyle.Right,
-                AutoSize = true,
+                Dock = DockStyle.Fill,
+                AutoSize = false,
                 FlowDirection = FlowDirection.RightToLeft,
                 WrapContents = false,
-                Padding = new Padding(0)
+                Padding = new Padding(0),
+                Margin = new Padding(0)
             };
             buttonFlow.Controls.Add(_cancelButton);
             buttonFlow.Controls.Add(_okButton);
@@ -817,17 +823,25 @@ internal sealed class TexturePreviewUI : UserControl
             _buttonPanel = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 44,
-                Padding = new Padding(8)
+                Height = 56,
+                Padding = new Padding(8, 8, 8, 8)
             };
             _buttonPanel.Controls.Add(buttonFlow);
+
+            _headerPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 56,
+                Padding = new Padding(8, 8, 8, 4)
+            };
+            _headerPanel.Controls.Add(_countLabel);
+            _headerPanel.Controls.Add(_filterTextBox);
 
             AcceptButton = _okButton;
             CancelButton = _cancelButton;
 
             Controls.Add(_listBox);
-            Controls.Add(_countLabel);
-            Controls.Add(_filterTextBox);
+            Controls.Add(_headerPanel);
             Controls.Add(_buttonPanel);
 
             ApplyFilter();

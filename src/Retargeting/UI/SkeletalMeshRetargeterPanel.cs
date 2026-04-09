@@ -233,6 +233,7 @@ internal sealed class SkeletalMeshRetargeterPanel : UserControl
             Dock = DockStyle.Fill
         };
         _posePreviewControl.SetBackend(MeshPreviewBackend.VorticeDirect3D11);
+        _posePreviewControl.Scene.DisableBackfaceCullingForFbx = true;
 
         _logTextBox = new TextBox
         {
@@ -331,7 +332,7 @@ internal sealed class SkeletalMeshRetargeterPanel : UserControl
         {
             Text = "Pose Preview",
             Dock = DockStyle.Top,
-            Height = 320
+            Height = 440
         };
         posePreviewGroup.Controls.Add(_posePreviewControl);
         Panel mappingPanel = new()

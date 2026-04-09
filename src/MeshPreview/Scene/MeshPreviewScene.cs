@@ -69,6 +69,7 @@ internal sealed class MeshPreviewScene
 {
     private readonly HashSet<int> _hiddenFbxSections = [];
     private readonly HashSet<int> _hiddenUe3Sections = [];
+    private readonly Dictionary<int, TexturePreviewMaterialSet> _fbxSectionMaterialOverrides = [];
     private readonly Dictionary<int, TexturePreviewMaterialSet> _ue3SectionMaterialOverrides = [];
 
     public MeshPreviewMesh FbxMesh { get; private set; }
@@ -84,6 +85,8 @@ internal sealed class MeshPreviewScene
     public bool ShowTangents { get; set; }
     public bool ShowUvSeams { get; set; }
     public bool MaterialPreviewEnabled { get; set; }
+    public bool DisableBackfaceCullingForFbx { get; set; }
+    public bool DisableBackfaceCullingForUe3 { get; set; }
     public MeshPreviewDisplayMode DisplayMode { get; set; } = MeshPreviewDisplayMode.Overlay;
     public MeshPreviewWeightViewMode WeightViewMode { get; set; } = MeshPreviewWeightViewMode.SelectedBoneHeatmap;
     public MeshPreviewShadingMode ShadingMode { get; set; } = MeshPreviewShadingMode.Lit;
@@ -156,7 +159,30 @@ internal sealed class MeshPreviewScene
     {
         SetFbxMesh(null);
         SetUe3Mesh(null);
+        ClearFbxSectionMaterialOverrides();
         ClearUe3SectionMaterialOverrides();
+    }
+
+    public void SetFbxSectionMaterialTexture(int sectionIndex, TexturePreviewMaterialSlot slot, TexturePreviewTexture texture)
+    {
+        if (!_fbxSectionMaterialOverrides.TryGetValue(sectionIndex, out TexturePreviewMaterialSet materialSet))
+        {
+            materialSet = new TexturePreviewMaterialSet { Enabled = true };
+            _fbxSectionMaterialOverrides[sectionIndex] = materialSet;
+        }
+
+        materialSet.SetTexture(slot, texture);
+        materialSet.Enabled = true;
+    }
+
+    public bool TryGetFbxSectionMaterialSet(int sectionIndex, out TexturePreviewMaterialSet materialSet)
+    {
+        return _fbxSectionMaterialOverrides.TryGetValue(sectionIndex, out materialSet) && materialSet.Enabled;
+    }
+
+    public void ClearFbxSectionMaterialOverrides()
+    {
+        _fbxSectionMaterialOverrides.Clear();
     }
 
     public void SetUe3SectionMaterialTexture(int sectionIndex, TexturePreviewMaterialSlot slot, TexturePreviewTexture texture)

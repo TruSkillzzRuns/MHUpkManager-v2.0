@@ -1,7 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net8.0-windows</TargetFrameworks>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <OutputType>Library</OutputType>
+    <Platform>x64</Platform>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- The following properies are used to manage how the project is packaged. -->
     <PackageId>SharpGL</PackageId>
     <Copyright>Copyright (c) Dave Kerr 2020</Copyright>
@@ -17,12 +19,10 @@ It provides wrappers for all OpenGL functions.</Description>
 	<NoWarn>1591</NoWarn>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RunCodeAnalysis>false</RunCodeAnalysis>
     <DocumentationFile />
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <DocumentationFile>bin\Release\SharpGL.xml</DocumentationFile>
   </PropertyGroup>
   <PropertyGroup>

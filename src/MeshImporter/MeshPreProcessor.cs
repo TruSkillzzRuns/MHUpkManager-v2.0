@@ -2,6 +2,7 @@ using UpkManager.Models.UpkFile.Engine.Mesh;
 using UpkManager.Models.UpkFile.Objects;
 using UpkManager.Models.UpkFile.Tables;
 using UpkManager.Repository;
+using MHUpkManager.BackupManager;
 
 namespace MHUpkManager.MeshImporter;
 
@@ -25,7 +26,7 @@ internal static class MeshPreProcessor
     {
         string directory = Path.GetDirectoryName(upkPath) ?? Environment.CurrentDirectory;
         string tempOutputPath = Path.Combine(directory, Path.GetFileNameWithoutExtension(upkPath) + "_meshimport_tmp.upk");
-        string backupPath = upkPath + ".bak";
+        string backupPath = null;
 
         try
         {
@@ -39,7 +40,7 @@ internal static class MeshPreProcessor
                 progress,
                 log).ConfigureAwait(false);
 
-            File.Copy(upkPath, backupPath, true);
+            backupPath = BackupFileHelper.CreateBackup(upkPath);
             File.Copy(tempOutputPath, upkPath, true);
             log?.Invoke($"Backup written: {backupPath}");
             log?.Invoke($"Replaced original UPK: {upkPath}");

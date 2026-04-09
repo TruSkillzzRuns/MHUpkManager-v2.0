@@ -40,7 +40,7 @@ namespace MHUpkManager
         private const string RetargetBuildMarker = "retarget-build-2026-04-04-packedposfix-v1";
         private const int ToolTabRightPanelWidth = 300;
         private readonly UpkFileRepository repository;
-        public const string AppName = "MH UPK Manager v.1.0 by AlexBond - Upgraded by TruskillzzRuns";
+        public const string AppName = "MH UPK Manager 2.0 by AlexBond - Upgraded by TruSkillzzRuns";
         public UnrealUpkFile UpkFile { get; set; }
 
         private HexViewForm hexViewForm;
@@ -87,6 +87,8 @@ namespace MHUpkManager
         private bool showingRetargetWarning;
         private bool darkModeEnabled;
         private ToolStripProfessionalRenderer darkMenuRenderer;
+        private string lastSelectedSkeletalMeshExportPath;
+        private string lastSelectedSkeletalMeshUpkPath;
 
         private List<TreeNode> rootNodes;
         private object currentObject;
@@ -128,7 +130,11 @@ namespace MHUpkManager
             materialInspectorPanel = new MaterialInspectorUI(GetCurrentUpkPath, GetCurrentSkeletalMeshExportPath);
             sectionMaterialMappingPanel = new SectionMaterialMappingUI(GetCurrentUpkPath, GetCurrentSkeletalMeshExportPath);
             texturePreviewPanel = new TexturePreviewUI(meshPreviewPanel, GetCurrentUpkPath, GetCurrentTextureExportPath);
-            materialTextureSwapPanel = new MaterialTextureSwapUI(GetCurrentUpkPath, GetCurrentSkeletalMeshExportPath, ShowTextureInPreviewTab);
+            materialTextureSwapPanel = new MaterialTextureSwapUI(
+                GetCurrentUpkPath,
+                GetCurrentSkeletalMeshExportPath,
+                ShowTextureInPreviewTab,
+                PreviewCharacterTexturesOnMeshAsync);
             characterTextureWorkflowPanel = new CharacterTextureWorkflowUI(
                 GetCurrentUpkPath,
                 GetCurrentSkeletalMeshExportPath,
@@ -279,12 +285,7 @@ namespace MHUpkManager
             menuStrip1.Renderer = darkModeEnabled
                 ? darkMenuRenderer ??= new ToolStripProfessionalRenderer(new DarkMenuColorTable())
                 : new ToolStripProfessionalRenderer();
-            fileToolStripMenuItem.ForeColor = text;
-            foreach (ToolStripItem item in fileToolStripMenuItem.DropDownItems)
-            {
-                item.ForeColor = text;
-                item.BackColor = surface;
-            }
+            ApplyMenuTheme(fileToolStripMenuItem, text, surface);
             statusStrip1.BackColor = surface;
             statusStrip1.ForeColor = text;
             splitContainer1.BackColor = border;
@@ -424,6 +425,24 @@ namespace MHUpkManager
                 }
 
                 ApplyThemeToControlTree(control, back, surface, surfaceAlt, border, text, muted, gridHeader, gridSelection);
+            }
+        }
+
+        private static void ApplyMenuTheme(ToolStripMenuItem menuItem, Color text, Color surface)
+        {
+            if (menuItem == null)
+                return;
+
+            menuItem.ForeColor = text;
+            menuItem.BackColor = surface;
+
+            foreach (ToolStripItem item in menuItem.DropDownItems)
+            {
+                item.ForeColor = text;
+                item.BackColor = surface;
+
+                if (item is ToolStripMenuItem childMenuItem)
+                    ApplyMenuTheme(childMenuItem, text, surface);
             }
         }
 
@@ -1276,7 +1295,7 @@ namespace MHUpkManager
                 : UiEditorSwfTransferMode.EmbeddedPayload;
 
             DialogResult confirm = MessageBox.Show(
-                $"This will replace the selected swfmovie export inside:\n{packagePath}\n\nA backup will be written next to it as:\n{packagePath}.bak\n\nContinue?",
+                $"This will replace the selected swfmovie export inside:\n{packagePath}\n\nA backup will be created next to it. Existing backups will be preserved and a unique backup name will be used when needed.\n\nContinue?",
                 "Re-Import SWF Export",
                 MessageBoxButtons.OKCancel,
                 MessageBoxIcon.Warning);
@@ -1799,6 +1818,11 @@ namespace MHUpkManager
                 skeletalMeshRetargeterPanel.SetPosePreviewSummary("Pose preview is ready after weight transfer or one-click bind.");
                 skeletalMeshRetargeterPanel.ClearPosePreview();
                 skeletalMeshRetargeterPanel.AppendLog($"Source mesh bone count: {retargetSourceMesh.Bones.Count}");
+                if (retargetSourceMesh.Bones.Count == 0)
+                {
+                    skeletalMeshRetargeterPanel.AppendLog(
+                        "Imported source mesh does not contain an explicit source skeleton. If Mesh Preview shows bones, those are coming from the selected game SkeletalMesh preview, not from the imported source mesh.");
+                }
                 skeletalMeshRetargeterPanel.SetWeightTransferSummary(
                     $"Imported {retargetSourceMesh.VertexCount} vertices, {retargetSourceMesh.TriangleCount} triangles, {retargetSourceMesh.Sections.Count} sections, {retargetSourceMesh.Bones.Count} source bones.");
                 skeletalMeshRetargeterPanel.ReportProgress(100, 100, "Mesh import completed.");
@@ -2083,8 +2107,19 @@ namespace MHUpkManager
 
             if (retargetSourceMesh.Bones.Count == 0)
             {
-                skeletalMeshRetargeterPanel.AppendLog("Auto bone mapping skipped because the imported source mesh has 0 bones.");
-                WarningBox("The imported source mesh has 0 bones. Import a skinned .psk/.fbx mesh first, then run Auto Bone Mapping again.");
+                int destinationBoneCount = retargetPlayerSkeleton?.Bones?.Count ?? 0;
+                skeletalMeshRetargeterPanel.AppendLog(
+                    $"Auto bone mapping skipped because the imported source mesh has 0 bones. The currently selected destination skeleton has {destinationBoneCount} bones, but Auto Map needs source bones to map from.");
+                WarningBox(
+                    "Auto Bone Mapping uses the imported source mesh bones, not the preview bones from the selected game SkeletalMesh." +
+                    "\n\n" +
+                    $"Imported source mesh bones: {retargetSourceMesh.Bones.Count}" +
+                    "\n" +
+                    $"Selected destination skeleton bones: {destinationBoneCount}" +
+                    "\n\n" +
+                    "If Mesh Preview shows a few bones on the game mesh, that does not mean the imported source mesh is skinned." +
+                    "\n\n" +
+                    "Import a skinned .psk/.fbx mesh first, then run Auto Bone Mapping again.");
                 return;
             }
 
@@ -2818,7 +2853,7 @@ namespace MHUpkManager
             }
 
             DialogResult confirm = MessageBox.Show(
-                $"This will replace the selected SkeletalMesh inside:\n{skeletalMeshRetargeterPanel.UpkPath}\n\nA backup will be written next to it as:\n{skeletalMeshRetargeterPanel.UpkPath}.bak\n\nContinue?",
+                $"This will replace the selected SkeletalMesh inside:\n{skeletalMeshRetargeterPanel.UpkPath}\n\nA backup will be created next to it. Existing backups will be preserved and a unique backup name will be used when needed.\n\nContinue?",
                 "Replace SkeletalMesh In UPK",
                 MessageBoxButtons.OKCancel,
                 MessageBoxIcon.Warning);
@@ -2909,7 +2944,7 @@ namespace MHUpkManager
             }
 
             DialogResult confirm = MessageBox.Show(
-                $"This will replace the selected UPK:\n{meshImporterPanel.UpkPath}\n\nA backup will be written next to it as:\n{meshImporterPanel.UpkPath}.bak\n\nContinue?",
+                $"This will replace the selected UPK:\n{meshImporterPanel.UpkPath}\n\nA backup will be created next to it. Existing backups will be preserved and a unique backup name will be used when needed.\n\nContinue?",
                 "Replace Current UPK",
                 MessageBoxButtons.OKCancel,
                 MessageBoxIcon.Warning);
@@ -3024,6 +3059,11 @@ namespace MHUpkManager
             try
             {
                 Cursor.Current = Cursors.WaitCursor;
+                if (!string.Equals(lastSelectedSkeletalMeshUpkPath, filePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    lastSelectedSkeletalMeshUpkPath = null;
+                    lastSelectedSkeletalMeshExportPath = null;
+                }
                 UpkFile = await OpenUpkFile(filePath);
                 RememberRecentUpk(filePath);
                 Text = $"{AppName} - [{UpkFile.GameFilename}]";
@@ -3140,6 +3180,8 @@ namespace MHUpkManager
 
             recentUpksMenuItem.DropDownItems.Add(new ToolStripSeparator());
             recentUpksMenuItem.DropDownItems.Add(clearRecentUpksMenuItem);
+
+            ApplyTheme();
         }
 
         private async void recentUpkMenuItem_Click(object sender, EventArgs e)
@@ -3169,7 +3211,7 @@ namespace MHUpkManager
 
             string initialFolder = GetPreferredUpkBrowseFolder();
             if (!string.IsNullOrWhiteSpace(initialFolder) && Directory.Exists(initialFolder))
-                dialog.InitialDirectory = initialFolder;
+                dialog.SelectedPath = initialFolder;
 
             if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath))
                 return;
@@ -3448,7 +3490,11 @@ namespace MHUpkManager
                     viewObjectInHEXMenuItem.Enabled = true;
 
                     if (export.UnrealObject is IUnrealObject uObject)
+                    {
                         BuildPropertyTree(uObject);
+                        if (uObject.UObject is USkeletalMesh)
+                            RememberSelectedSkeletalMeshExport(export.GetPathName());
+                    }
                     UpdateInspectorSummary();
                 }
                 catch (Exception ex)
@@ -4007,12 +4053,34 @@ namespace MHUpkManager
         private string GetCurrentSkeletalMeshExportPath()
         {
             if (currentObject is not UnrealExportTableEntry export)
-                return null;
+                return GetRememberedSkeletalMeshExportPath();
 
             if (export.UnrealObject is not IUnrealObject unrealObject || unrealObject.UObject is not USkeletalMesh)
-                return null;
+                return GetRememberedSkeletalMeshExportPath();
 
             return export.GetPathName();
+        }
+
+        private string GetRememberedSkeletalMeshExportPath()
+        {
+            string currentUpkPath = GetCurrentUpkPath();
+            if (string.IsNullOrWhiteSpace(currentUpkPath) ||
+                !string.Equals(currentUpkPath, lastSelectedSkeletalMeshUpkPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return lastSelectedSkeletalMeshExportPath;
+        }
+
+        private void RememberSelectedSkeletalMeshExport(string exportPath)
+        {
+            string currentUpkPath = GetCurrentUpkPath();
+            if (string.IsNullOrWhiteSpace(currentUpkPath) || string.IsNullOrWhiteSpace(exportPath))
+                return;
+
+            lastSelectedSkeletalMeshUpkPath = currentUpkPath;
+            lastSelectedSkeletalMeshExportPath = exportPath;
         }
 
         private void ShowTextureInPreviewTab(TexturePreviewTexture texture)
@@ -4047,6 +4115,7 @@ namespace MHUpkManager
 
                 TexturePreviewTexture texture = loader.LoadFromFile(path, slot);
                 texture.Slot = slot;
+                meshPreviewPanel.SetFbxSectionPreviewTexture(sectionIndex, slot, texture);
                 meshPreviewPanel.SetUe3SectionPreviewTexture(sectionIndex, slot, texture);
                 focusSection ??= sectionIndex;
             }
@@ -4099,7 +4168,7 @@ namespace MHUpkManager
 
             string sourceUpkPath = Path.Combine(UpkFile.ContentsRoot, UpkFile.GameFilename);
             DialogResult confirm = MessageBox.Show(
-                $"This will replace the currently opened UPK:\n{sourceUpkPath}\n\nA backup will be written next to it as:\n{sourceUpkPath}.bak\n\nContinue?",
+                $"This will replace the currently opened UPK:\n{sourceUpkPath}\n\nA backup will be created next to it. Existing backups will be preserved and a unique backup name will be used when needed.\n\nContinue?",
                 "Replace Current UPK",
                 MessageBoxButtons.OKCancel,
                 MessageBoxIcon.Warning);

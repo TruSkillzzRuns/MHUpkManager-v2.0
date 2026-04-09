@@ -1,7 +1,8 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net8.0-windows</TargetFrameworks>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <OutputType>Library</OutputType>
+    <Platform>x64</Platform>
     <UseWindowsForms>true</UseWindowsForms>
     <!-- The following properies are used to manage how the project is packaged. -->
     <PackageId>SharpGL.WinForms</PackageId>
@@ -16,7 +17,7 @@
       SharpGL.WinForms contains controls to use OpenGL in WinForms applications.
     </Description>
     <Platforms>x64</Platforms>
-	<NoWarn>1591</NoWarn>
+    <NoWarn>1591</NoWarn>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <DocumentationFile>bin\Release\SharpGL.WinForms.xml</DocumentationFile>

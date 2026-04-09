@@ -18,6 +18,7 @@ internal sealed class MaterialTextureSwapUI : UserControl
     private readonly Func<string> _currentUpkPathProvider;
     private readonly Func<string> _currentSkeletalMeshExportPathProvider;
     private readonly Action<TexturePreviewTexture> _openTextureInPreview;
+    private readonly Func<string, string, IReadOnlyList<(int SectionIndex, TexturePreviewMaterialSlot Slot, string ReplacementFilePath)>, Task> _previewTexturesOnMesh;
     private readonly UpkFileRepository _repository = new();
     private readonly UpkTextureLoader _upkTextureLoader = new();
     private readonly SplitContainer _verticalSplit;
@@ -40,11 +41,13 @@ internal sealed class MaterialTextureSwapUI : UserControl
     public MaterialTextureSwapUI(
         Func<string> currentUpkPathProvider,
         Func<string> currentSkeletalMeshExportPathProvider,
-        Action<TexturePreviewTexture> openTextureInPreview)
+        Action<TexturePreviewTexture> openTextureInPreview,
+        Func<string, string, IReadOnlyList<(int SectionIndex, TexturePreviewMaterialSlot Slot, string ReplacementFilePath)>, Task> previewTexturesOnMesh = null)
     {
         _currentUpkPathProvider = currentUpkPathProvider;
         _currentSkeletalMeshExportPathProvider = currentSkeletalMeshExportPathProvider;
         _openTextureInPreview = openTextureInPreview;
+        _previewTexturesOnMesh = previewTexturesOnMesh;
         Dock = DockStyle.Fill;
 
         _upkPathTextBox = CreatePathTextBox("No UPK selected.");
@@ -168,7 +171,7 @@ internal sealed class MaterialTextureSwapUI : UserControl
         _sectionListView.SelectedIndexChanged += (_, _) => BindTextureParams();
         _textureParamListView.SelectedIndexChanged += (_, _) => ShowSelectionDetails();
         _openCurrentTextureButton.Click += async (_, _) => await OpenCurrentTextureInPreviewAsync().ConfigureAwait(true);
-        _loadReplacementToPreviewButton.Click += (_, _) => LoadReplacementFileToPreview();
+        _loadReplacementToPreviewButton.Click += async (_, _) => await LoadReplacementFileToPreviewAsync().ConfigureAwait(true);
         Resize += (_, _) =>
         {
             if (_contentSplitInitialized)
@@ -461,7 +464,7 @@ internal sealed class MaterialTextureSwapUI : UserControl
         }
     }
 
-    private void LoadReplacementFileToPreview()
+    private async Task LoadReplacementFileToPreviewAsync()
     {
         using OpenFileDialog dialog = new()
         {
@@ -482,6 +485,19 @@ internal sealed class MaterialTextureSwapUI : UserControl
             texture.Slot = slot;
             _openTextureInPreview?.Invoke(texture);
             Log($"Loaded replacement texture into Texture Preview: {dialog.FileName}");
+
+            if (_previewTexturesOnMesh != null &&
+                !string.IsNullOrWhiteSpace(_upkPathTextBox.Text) &&
+                !string.IsNullOrWhiteSpace(_meshPathTextBox.Text) &&
+                _textureParamListView.SelectedItems.Count > 0 &&
+                _textureParamListView.SelectedItems[0].Tag is ValueTuple<SwapSectionInfo, SwapTextureTarget> taggedTarget)
+            {
+                await _previewTexturesOnMesh(
+                    _upkPathTextBox.Text,
+                    _meshPathTextBox.Text,
+                    [(taggedTarget.Item1.SectionIndex, slot, dialog.FileName)]).ConfigureAwait(true);
+                Log($"Applied replacement preview to mesh section {taggedTarget.Item1.SectionIndex} ({slot}).");
+            }
         }
         catch (Exception ex)
         {

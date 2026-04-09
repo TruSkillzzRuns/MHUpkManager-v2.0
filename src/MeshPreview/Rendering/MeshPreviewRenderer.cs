@@ -116,9 +116,13 @@ internal sealed class MeshPreviewRenderer : IDisposable
             return;
 
         mesh.Upload();
+        bool disableBackfaceCulling = ue3Mesh ? scene.DisableBackfaceCullingForUe3 : scene.DisableBackfaceCullingForFbx;
 
         if (scene.Wireframe)
             GL.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
+
+        if (disableBackfaceCulling)
+            GL.Disable(EnableCap.CullFace);
 
         _meshShader.Use();
         _meshShader.SetMatrix4("uProjection", projection);
@@ -150,6 +154,9 @@ internal sealed class MeshPreviewRenderer : IDisposable
         }
         GL.BindVertexArray(0);
         ResetSectionMaterialState();
+
+        if (disableBackfaceCulling)
+            GL.Enable(EnableCap.CullFace);
 
         if (scene.Wireframe)
             GL.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
@@ -416,7 +423,13 @@ internal sealed class MeshPreviewRenderer : IDisposable
 
         if (!useGameMaterial)
         {
-            if (scene.MaterialPreviewEnabled && ue3Mesh && scene.TryGetUe3SectionMaterialSet(section.Index, out TexturePreviewMaterialSet sectionMaterialSet))
+            TexturePreviewMaterialSet sectionMaterialSet = null;
+            bool hasSectionOverride = scene.MaterialPreviewEnabled &&
+                (ue3Mesh
+                    ? scene.TryGetUe3SectionMaterialSet(section.Index, out sectionMaterialSet)
+                    : scene.TryGetFbxSectionMaterialSet(section.Index, out sectionMaterialSet));
+
+            if (hasSectionOverride)
             {
                 ApplyMaterialState(scene, sectionMaterialSet);
                 _meshShader.SetInt("uUseGameMaterial", 0);

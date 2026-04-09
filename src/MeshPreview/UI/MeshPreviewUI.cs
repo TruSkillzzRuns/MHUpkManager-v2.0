@@ -361,6 +361,11 @@ internal sealed class MeshPreviewUI : UserControl
         _previewControl.Scene.SetUe3SectionMaterialTexture(sectionIndex, slot, texture);
     }
 
+    public void SetFbxSectionPreviewTexture(int sectionIndex, TexturePreviewMaterialSlot slot, TexturePreviewTexture texture)
+    {
+        _previewControl.Scene.SetFbxSectionMaterialTexture(sectionIndex, slot, texture);
+    }
+
     public void SetMaterialPreviewEnabled(bool enabled)
     {
         _previewControl.Scene.MaterialPreviewEnabled = enabled;
@@ -372,6 +377,7 @@ internal sealed class MeshPreviewUI : UserControl
         _previewControl.Scene.MaterialSet.Clear();
         _previewControl.Scene.MaterialSet.Enabled = false;
         _previewControl.Scene.MaterialPreviewEnabled = false;
+        _previewControl.Scene.ClearFbxSectionMaterialOverrides();
         _previewControl.Scene.ClearUe3SectionMaterialOverrides();
     }
 

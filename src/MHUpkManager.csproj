@@ -3,8 +3,10 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
+    <Platform>x64</Platform>
     <Nullable>disable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
     <ApplicationIcon>Resources\MHIcon.ico</ApplicationIcon>
     <ImplicitUsings>enable</ImplicitUsings>    
 	<PlatformTarget>x64</PlatformTarget>
@@ -34,7 +36,6 @@
   <ItemGroup>
     <ProjectReference Include="..\DDSLib\DDSLib.csproj" />
     <ProjectReference Include="..\SharpGL\SharpGL.WinForms\SharpGL.WinForms.csproj" />
-    <ProjectReference Include="..\SharpGL\SharpGL\SharpGL.csproj" />
     <ProjectReference Include="..\UpkManager\UpkManager.csproj" />
   </ItemGroup>
   

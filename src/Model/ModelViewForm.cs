@@ -197,7 +197,7 @@ namespace MHUpkManager
                 return;
 
             DialogResult confirm = MessageBox.Show(
-                $"This will replace the current UPK:\n{sourceUpkPath}\n\nA backup will be written next to it as:\n{sourceUpkPath}.bak\n\nContinue?",
+                $"This will replace the current UPK:\n{sourceUpkPath}\n\nA backup will be created next to it. Existing backups will be preserved and a unique backup name will be used when needed.\n\nContinue?",
                 "Replace Current UPK",
                 MessageBoxButtons.OKCancel,
                 MessageBoxIcon.Warning);

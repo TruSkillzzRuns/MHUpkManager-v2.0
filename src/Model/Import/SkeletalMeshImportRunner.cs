@@ -1,3 +1,5 @@
+using MHUpkManager.BackupManager;
+
 namespace MHUpkManager.Model.Import;
 
 internal static class SkeletalMeshImportRunner
@@ -6,12 +8,12 @@ internal static class SkeletalMeshImportRunner
     {
         string directory = Path.GetDirectoryName(upkPath) ?? Environment.CurrentDirectory;
         string tempOutputPath = Path.Combine(directory, Path.GetFileNameWithoutExtension(upkPath) + "_fbximport_tmp.upk");
-        string backupPath = upkPath + ".bak";
+        string backupPath = null;
 
         SkeletalMeshImportPipeline pipeline = new();
         await pipeline.ImportAsync(upkPath, exportPath, fbxPath, tempOutputPath, lodIndex).ConfigureAwait(false);
 
-        File.Copy(upkPath, backupPath, true);
+        backupPath = BackupFileHelper.CreateBackup(upkPath);
         File.Copy(tempOutputPath, upkPath, true);
         File.Delete(tempOutputPath);
 

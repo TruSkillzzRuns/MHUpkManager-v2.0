@@ -572,6 +572,7 @@ internal sealed class VorticeMeshPreviewRenderer : IDisposable
             return;
 
         CachedMeshBuffers buffers = GetMeshBuffers(mesh);
+        ID3D11RasterizerState rasterizerState = ResolveRasterizerState(scene, ue3Mesh);
         Matrix4x4 projection = camera.GetProjectionMatrix(Math.Max(1.0f, viewport.Width) / Math.Max(1.0f, viewport.Height));
         Matrix4x4 view = camera.GetViewMatrix();
 
@@ -604,7 +605,7 @@ internal sealed class VorticeMeshPreviewRenderer : IDisposable
         _context.VSSetConstantBuffer(0, _meshConstantBuffer);
         _context.PSSetConstantBuffer(0, _meshConstantBuffer);
         _context.PSSetSampler(0, _textureSampler);
-        _context.RSSetState(scene.Wireframe ? _wireframeRasterizerState : _solidRasterizerState);
+        _context.RSSetState(rasterizerState);
 
         foreach (MeshPreviewSection section in mesh.Sections)
         {
@@ -754,17 +755,24 @@ internal sealed class VorticeMeshPreviewRenderer : IDisposable
 
     private void ApplySectionMaterialState(MeshPreviewScene scene, MeshPreviewSection section, bool ue3Mesh, ref MeshConstants constants)
     {
+        ID3D11RasterizerState rasterizerState = ResolveRasterizerState(scene, ue3Mesh);
         bool gameApprox = ue3Mesh && scene.ShadingMode == MeshPreviewShadingMode.GameApprox;
         bool useGameMaterial = gameApprox && section.GameMaterial?.Enabled == true;
 
         if (!useGameMaterial)
         {
-            if (scene.MaterialPreviewEnabled && ue3Mesh && scene.TryGetUe3SectionMaterialSet(section.Index, out TexturePreviewMaterialSet sectionMaterialSet))
+            TexturePreviewMaterialSet sectionMaterialSet = null;
+            bool hasSectionOverride = scene.MaterialPreviewEnabled &&
+                (ue3Mesh
+                    ? scene.TryGetUe3SectionMaterialSet(section.Index, out sectionMaterialSet)
+                    : scene.TryGetFbxSectionMaterialSet(section.Index, out sectionMaterialSet));
+
+            if (hasSectionOverride)
             {
                 ApplyMaterialState(scene, sectionMaterialSet, ref constants);
                 constants.UseGameMaterial = 0;
                 constants.AlphaTest = 0.0f;
-                _context.RSSetState(scene.Wireframe ? _wireframeRasterizerState : _solidRasterizerState);
+                _context.RSSetState(rasterizerState);
                 return;
             }
 
@@ -776,7 +784,7 @@ internal sealed class VorticeMeshPreviewRenderer : IDisposable
 
             ApplyMaterialState(scene, ref constants);
             constants.UseGameMaterial = 0;
-            _context.RSSetState(scene.Wireframe ? _wireframeRasterizerState : _solidRasterizerState);
+            _context.RSSetState(rasterizerState);
             return;
         }
 
@@ -839,7 +847,7 @@ internal sealed class VorticeMeshPreviewRenderer : IDisposable
         constants.HasSmrr = 0.0f;
         constants.HasSpecColorMap = 0.0f;
 
-        _context.RSSetState(scene.Wireframe ? _wireframeRasterizerState : _solidRasterizerState);
+        _context.RSSetState(rasterizerState);
     }
 
     private void ResetSectionMaterialState(ref MeshConstants constants)
@@ -866,6 +874,15 @@ internal sealed class VorticeMeshPreviewRenderer : IDisposable
 
         for (uint slot = 0; slot <= 5; slot++)
             _context.PSSetShaderResource(slot, null);
+    }
+
+    private ID3D11RasterizerState ResolveRasterizerState(MeshPreviewScene scene, bool ue3Mesh)
+    {
+        bool disableBackfaceCulling = ue3Mesh ? scene.DisableBackfaceCullingForUe3 : scene.DisableBackfaceCullingForFbx;
+        if (scene.Wireframe)
+            return disableBackfaceCulling ? _wireframeRasterizerStateNoCull : _wireframeRasterizerState;
+
+        return disableBackfaceCulling ? _solidRasterizerStateNoCull : _solidRasterizerState;
     }
 
     private void BindGameMaterialTexture(int slot, MeshPreviewGameMaterial material, MeshPreviewGameTextureSlot gameSlot, ref float hasTexture)

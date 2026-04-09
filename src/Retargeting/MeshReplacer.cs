@@ -1,4 +1,5 @@
 using System.Numerics;
+using MHUpkManager.BackupManager;
 using MHUpkManager.MeshImporter;
 using UpkManager.Models.UpkFile.Engine.Mesh;
 using UpkManager.Models.UpkFile.Objects;
@@ -62,7 +63,7 @@ internal sealed class MeshReplacer
 
         string directory = Path.GetDirectoryName(upkPath) ?? Environment.CurrentDirectory;
         string tempOutputPath = Path.Combine(directory, Path.GetFileNameWithoutExtension(upkPath) + "_retarget_tmp.upk");
-        string backupPath = upkPath + ".bak";
+        string backupPath = null;
 
         try
         {
@@ -97,7 +98,7 @@ internal sealed class MeshReplacer
                     File.Delete(path);
             }
 
-            File.Copy(upkPath, backupPath, true);
+            backupPath = BackupFileHelper.CreateBackup(upkPath);
             File.Copy(tempOutputPath, upkPath, true);
             log?.Invoke($"Backup written: {backupPath}");
             log?.Invoke($"Replaced SkeletalMesh export '{skeletalMeshExportPath}' in {upkPath}.");
